@@ -796,59 +796,55 @@ elif menu == "🗺️ 터미널 구역별 상세 분석":
 # ==========================================
 elif menu == "🔍 모델 예측 및 검증 (Validation)":
     st.title("🔍 인공지능 기반 여객 수요 예측 앙상블 모델 검증")
-    st.markdown(f"> **[모델 관리 및 검증 모드]** 깃허브에 저장된 AI 모델(`{RF_MODEL_PATH}`, `{XGB_MODEL_PATH}`)을 자동으로 탐색합니다. 파일이 없거나 새로 학습하고 싶을 때만 아래 버튼을 사용하세요.")
+    st.markdown(f"> **[모델 관리 및 검증 모드]** 깃허브 프로젝트 내(`pages/` 폴더 또는 루트)에 저장된 AI 모델 파일(`{RF_MODEL_PATH}`, `{XGB_MODEL_PATH}`)을 자동으로 탐색합니다.")
 
-    # 1. 깃허브 또는 로컬에 모델이 존재하는지 확인
+    # 1. 깃허브 및 로컬 경로 상에서 모델 파일 존재 여부 정밀 확인
     rf_exists = os.path.exists(RF_MODEL_PATH)
     xgb_exists = os.path.exists(XGB_MODEL_PATH)
 
     if rf_exists and xgb_exists:
-        st.success(f"✅ 깃허브(또는 로컬 환경)에서 기존 학습 모델을 성공적으로 불러왔습니다! (`{RF_MODEL_PATH}`, `{XGB_MODEL_PATH}`)")
+        st.success(f"✅ 깃허브 프로젝트 경로에서 앙상블 구성 모델을 정상적으로 불러왔습니다! (`{RF_MODEL_PATH}`, `{XGB_MODEL_PATH}`)")
     else:
-        st.warning("⚠️ 깃허브 저장소에 사전 학습된 모델 파일(`.pkl`)이 없습니다. 아래에서 **[모델 학습 시작하기]**를 눌러주세요.")
+        st.warning("⚠️ **[안내]** 깃허브 pages 폴더 또는 프로젝트 루트에 필요한 모델 파일이 없습니다. 아래에서 모델을 새로 학습시켜 주세요.")
 
-    st.markdown("### ⚙️ AI 모델 학습 제어 패널")
+    st.markdown("### ⚙️ AI 앙상블 모델 학습 제어 패널")
     
-    # 학습 버튼 (날짜를 바꾼다고 자동으로 눌리지 않고, 사용자가 직접 누를 때만 동작)
-    if st.button("🔄 9~10월 데이터로 AI 모델 새로 학습 및 저장하기 (Train Model)"):
-        with st.spinner("AI 모델을 학습 중입니다. 잠시만 기다려주세요..."):
+    # 학습 버튼 (사용자가 직접 누를 때만 동작)
+    if st.button("🔄 9~10월 데이터로 앙상블 모델(RF + XGB) 학습 및 생성하기"):
+        with st.spinner("Random Forest와 XGBoost 모델을 모두 학습 및 앙상블 구성 중입니다..."):
             success, msg = train_and_save_models()
             if success:
                 st.success(f"🎉 {msg}")
-                # 학습 직후 최신 상태 반영을 위해 페이지 새로고침 효과
                 st.rerun()
             else:
                 st.error(f"❌ 학습 실패: {msg}")
 
-    # 2. 모델이 존재하거나 학습이 완료된 경우에만 '다운로드 버튼' 및 '검증 대시보드' 활성화
+    # 2. 모델이 존재하거나 학습이 완료된 경우 앙상블 통합 다운로드 및 검증 진행
     rf_model, xgb_model = load_precomputed_models()
 
-    if rf_model is not None:
+    if rf_model is not None and xgb_model is not None:
         st.markdown("---")
-        st.markdown("##### 📥 방금 학습(또는 불러온) 모델 파일 다운로드")
-        col_down1, col_down2 = st.columns(2)
+        st.markdown("##### 📥 최종 앙상블 패키지 다운로드")
         
-        with open(RF_MODEL_PATH, "rb") as f:
-            col_down1.download_button(
-                label="📥 Random Forest 모델 다운로드 (.pkl)",
-                data=f,
-                file_name="rf_model.pkl",
-                mime="application/octet-stream"
-            )
-            
-        if os.path.exists(XGB_MODEL_PATH):
-            with open(XGB_MODEL_PATH, "rb") as f:
-                col_down2.download_button(
-                    label="📥 XGBoost 모델 다운로드 (.pkl)",
-                    data=f,
-                    file_name="xgb_model.pkl",
-                    mime="application/octet-stream"
-                )
-        st.info("💡 다운로드한 `.pkl` 파일을 깃허브(GitHub) 레포지토리에 직접 업로드해두시면, 다음부터는 학습을 누를 필요 없이 깃허브의 모델을 자동 적용합니다!")
+        # 랜덤포레스트와 XGBoost를 함께 묶은 앙상블 패키지 딕셔너리 생성
+        ensemble_package = {
+            "rf_model": rf_model,
+            "xgb_model": xgb_model,
+            "weights": [0.5, 0.5]
+        }
+        ensemble_bytes = joblib.dumps(ensemble_package)
+        
+        st.download_button(
+            label="📥 앙상블 모델 패키지 다운로드 (.pkl) (RF + XGB 통합)",
+            data=ensemble_bytes,
+            file_name="ensemble_traffic_model.pkl",
+            mime="application/octet-stream"
+        )
+        st.info("💡 다운로드하신 `ensemble_traffic_model.pkl` 파일을 깃허브 `test_sum` 프로젝트(pages 폴더 또는 루트)에 업로드해 두시면, 다음부터는 학습 버튼을 누르지 않아도 자동으로 앙상블 예측을 수행합니다!")
 
         st.divider()
 
-        # 예측 및 검증 로직 실행 (날짜를 바꿔도 모델이 있으면 이쪽으로 곧바로 진입함)
+        # 예측 및 검증 로직 실행
         if exists and past_time_data:
             val_rows = []
             for t_idx in sorted(past_time_data.keys()):
@@ -877,14 +873,11 @@ elif menu == "🔍 모델 예측 및 검증 (Validation)":
                 "실제 측정치 (Ground Truth)": 300 + np.random.normal(0, 30, len(time_idx_val))
             })
 
-        # 앙상블 모델 예측 수행 (Random Forest 50% + XGBoost 50%)
+        # 앙상블 예측 수행 (RF 50% + XGB 50%)
         X_target = df_val[['hour', 'minute', 'dayofweek']]
         pred_rf = rf_model.predict(X_target)
-        if xgb_model is not None:
-            pred_xgb = xgb_model.predict(X_target)
-            predicted_vals = (0.5 * pred_rf) + (0.5 * pred_xgb)
-        else:
-            predicted_vals = pred_rf
+        pred_xgb = xgb_model.predict(X_target)
+        predicted_vals = (0.5 * pred_rf) + (0.5 * pred_xgb)
 
         df_val['앙상블 예측치 (RF+XGB)'] = predicted_vals
         df_val['잔차 (Residual)'] = df_val['실제 측정치 (Ground Truth)'] - df_val['앙상블 예측치 (RF+XGB)']
@@ -918,7 +911,7 @@ elif menu == "🔍 모델 예측 및 검증 (Validation)":
         )
         st.altair_chart(val_chart, use_container_width=True)
     else:
-        st.error(f"⚠️ 사용 가능한 모델이 없습니다. 깃허브 레포지토리에 `{RF_MODEL_PATH}` 파일이 업로드되어 있는지 확인하시거나, 위쪽의 **[모델 학습 새로 시작하기]** 버튼을 눌러주세요.")
+        st.error(f"⚠️ 깃허브 pages 폴더 내에 앙상블 모델 파일(`{RF_MODEL_PATH}` 또는 `{XGB_MODEL_PATH}`)이 존재하지 않습니다. 상단의 **[앙상블 모델 학습 및 생성하기]** 버튼을 눌러 모델을 생성하시거나 파일을 업로드해 주세요.")
 # ==========================================
 # 4. 📡 실시간 센서 파이프라인 (Live)
 # ==========================================
