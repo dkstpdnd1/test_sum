@@ -9,13 +9,6 @@ import streamlit as st
 import scipy.signal as signal
 import altair as alt
 
-from sklearn.ensemble import RandomForestRegressor
-try:
-    from xgboost import XGBRegressor
-    HAS_XGB = True
-except ImportError:
-    HAS_XGB = False
-
 
 # --- [시스템 설정] ---
 AREA_FILE_PATH = "terminal_areas_grouped_2.csv"         
@@ -385,80 +378,12 @@ def load_data_by_date(selected_date_str):
         time_grouped_data[t_index] = {'counts': dict(zip(filtered['area'], filtered['num_people']))}
     return area_df, time_grouped_data, sorted(list(time_grouped_data.keys())), bg_img, True
 
-# --- [AI 모델 로드 및 학습 함수] ---
+# --- [AI 모델 로드 함수] ---
 @st.cache_resource
 def load_precomputed_models():
     rf = joblib.load(RF_MODEL_PATH) if os.path.exists(RF_MODEL_PATH) else None
     xgb = joblib.load(XGB_MODEL_PATH) if os.path.exists(XGB_MODEL_PATH) else None
     return rf, xgb
-
-def train_and_save_models():
-    all_files = glob.glob("area_count_time_full_*.csv")
-    if not all_files:
-        return False, "학습할 CSV 파일(`area_count_time_full_*.csv`)을 찾지 못했습니다."
-
-    progress_bar = st.progress(0)
-    status_text = st.empty()
-    
-    total_files = len(all_files)
-    collected_rows = []
-    
-    for i, fpath in enumerate(all_files):
-        progress_percent = int(((i + 1) / total_files) * 70)
-        progress_bar.progress(progress_percent / 100)
-        status_text.text(f"📁 파일 파싱 중... ({i + 1}/{total_files}) - {os.path.basename(fpath)}")
-        
-        try:
-            df_part = pd.read_csv(fpath)
-            if not {'time_index', 'area', 'num_people'}.issubset(df_part.columns):
-                continue
-            date_str = fpath.replace("area_count_time_full_", "").replace(".csv", "")
-            dt_base = pd.to_datetime(date_str, errors='coerce')
-            if pd.isna(dt_base):
-                continue
-                
-            for t_idx, group in df_part.groupby('time_index'):
-                filtered = group[group['area'] != 'Outside']
-                total_p = filtered['num_people'].sum()
-                total_sec = int(t_idx) * 10
-                h, m = total_sec // 3600, (total_sec % 3600) // 60
-                
-                collected_rows.append({
-                    "hour": h,
-                    "minute": m,
-                    "dayofweek": dt_base.dayofweek,
-                    "target": total_p
-                })
-        except Exception:
-            continue
-
-    df_train = pd.DataFrame(collected_rows)
-    if df_train.empty:
-        progress_bar.empty()
-        status_text.empty()
-        return False, "유효한 학습 데이터가 추출되지 않았습니다."
-
-    X = df_train[['hour', 'minute', 'dayofweek']]
-    y = df_train['target']
-
-    progress_bar.progress(0.75)
-    status_text.text("🤖 Random Forest 모델 학습 중...")
-    rf_model = RandomForestRegressor(n_estimators=5, random_state=42)
-    rf_model.fit(X, y)
-    joblib.dump(rf_model, RF_MODEL_PATH)
-
-    if HAS_XGB:
-        progress_bar.progress(0.90)
-        status_text.text("🚀 XGBoost 모델 학습 중...")
-        xgb_model = XGBRegressor(n_estimators=5, learning_rate=0.1, max_depth=3, random_state=42)
-        xgb_model.fit(X, y)
-        joblib.dump(xgb_model, XGB_MODEL_PATH)
-
-    progress_bar.progress(1.0)
-    status_text.text("✨ 학습 및 저장 완료!")
-    
-    st.cache_resource.clear()
-    return True, f"총 {len(df_train):,}개 샘플로 모델 학습 및 저장 완료!"
 
 def get_daily_peaks(df_trend):
     peaks = {}
@@ -795,88 +720,17 @@ elif menu == "🗺️ 터미널 구역별 상세 분석":
 # 3. 🔍 모델 예측 및 검증 (Validation)
 # ==========================================
 elif menu == "🔍 모델 예측 및 검증 (Validation)":
-    st.title("🔍 인공지능 기반 여객 수요 예측 앙상블 모델 검증")
-    st.markdown("> **[모델 관리 및 검증 모드]** 모델을 학습하고 곧바로 다운로드합니다.")
+    st.title("🔍 인공지능 기반 여객 수요 예측 모델 검증")
+    st.markdown("> **[모델 검증 모드]** 사전 학습된 예측 모델을 불러와 성능을 검증합니다.")
 
-    # 1. 파일 경로 탐색
-    ENSEMBLE_PATH = "pages/ensemble_traffic_model.pkl"
-    if not os.path.exists(ENSEMBLE_PATH) and os.path.exists("ensemble_traffic_model.pkl"):
-        ENSEMBLE_PATH = "ensemble_traffic_model.pkl"
+    # 모델 파일 로드
+    rf_model, xgb_model = load_precomputed_models()
 
-    # 2. 학습 및 메모리 다운로드 제어 패널
-    st.markdown("### ⚙️ AI 앙상블 모델 학습 및 다운로드 제어 패널")
-    
-    # 세션 상태에 다운로드용 바이트 데이터 저장 공간 확보
-    if "model_bytes" not in st.session_state:
-        st.session_state["model_bytes"] = None
-
-    if st.button("🔄 9~10월 데이터로 앙상블 모델(RF + XGB) 학습 및 다운로드 파일 생성"):
-        with st.spinner("Random Forest와 XGBoost를 모두 학습하고 있습니다..."):
-            success, msg = train_and_save_models()
-            if success:
-                st.success(f"🎉 {msg}")
-                
-                # ⭐ 핵심: 디스크 파일뿐만 아니라 메모리(Bytes)에도 패키지를 로드하여 즉시 다운로드 준비
-                target_path = ENSEMBLE_PATH if os.path.exists(ENSEMBLE_PATH) else "ensemble_traffic_model.pkl"
-                if os.path.exists(target_path):
-                    with open(target_path, "rb") as f:
-                        st.session_state["model_bytes"] = f.read()
-                st.rerun()
-            else:
-                st.error(f"❌ 학습 실패: {msg}")
-
-    st.markdown("---")
-    st.markdown("##### 📥 깃허브 업로드용 앙상블 모델 패키지 다운로드")
-
-    # 만약 세션에 데이터가 없지만 폴더에 파일이 존재한다면 읽어오기
-    if st.session_state["model_bytes"] is None and os.path.exists(ENSEMBLE_PATH):
-        with open(ENSEMBLE_PATH, "rb") as f:
-            st.session_state["model_bytes"] = f.read()
-
-    # 메모리에 다운로드할 데이터가 준비되어 있다면 즉시 다운로드 버튼 활성화
-    if st.session_state["model_bytes"] is not None:
-        st.success("✅ 다운로드 준비가 완료되었습니다! 아래 버튼을 눌러주세요.")
-        st.download_button(
-            label="📥 앙상블 모델 패키지 다운로드 (.pkl) (즉시 다운로드)",
-            data=st.session_state["model_bytes"],
-            file_name="ensemble_traffic_model.pkl",
-            mime="application/octet-stream",
-            key="memory_download_btn"
-        )
+    if rf_model is None and xgb_model is None:
+        st.error(f"⚠️ 저장된 예측 모델 파일(`{RF_MODEL_PATH}` 또는 `{XGB_MODEL_PATH}`)을 찾을 수 없습니다. 모델 파일을 경로에 위치시켜 주세요.")
     else:
-        st.warning("⚠️ 아직 학습된 모델 데이터가 없습니다. 위쪽의 **[학습 및 생성하기]** 버튼을 눌러주세요.")
-        st.download_button(
-            label="📥 앙상블 모델 패키지 다운로드 (.pkl) (비활성화)",
-            data=b"",
-            file_name="ensemble_traffic_model.pkl",
-            mime="application/octet-stream",
-            disabled=True,
-            key="disabled_memory_btn"
-        )
-
-    st.divider()
-
-    # 3. 모델 로드 및 검증 수행
-    ensemble_model_pkg = None
-    if st.session_state["model_bytes"] is not None:
-        try:
-            import io
-            ensemble_model_pkg = joblib.load(io.BytesIO(st.session_state["model_bytes"]))
-        except Exception as e:
-            st.error(f"❌ 메모리에서 모델을 불러오는 중 오류가 발생했습니다: {e}")
-    elif os.path.exists(ENSEMBLE_PATH):
-        try:
-            ensemble_model_pkg = joblib.load(ENSEMBLE_PATH)
-        except Exception as e:
-            st.error(f"❌ 파일에서 모델을 불러오는 중 오류가 발생했습니다: {e}")
-
-    if ensemble_model_pkg is not None:
-        if isinstance(ensemble_model_pkg, dict):
-            rf_model = ensemble_model_pkg.get("rf_model")
-            xgb_model = ensemble_model_pkg.get("xgb_model")
-        else:
-            rf_model = ensemble_model_pkg
-            xgb_model = None
+        st.success("✅ 사전 학습된 예측 모델을 성공적으로 불러왔습니다.")
+        st.divider()
 
         # 예측 및 검증 로직 실행
         if exists and past_time_data:
@@ -907,7 +761,7 @@ elif menu == "🔍 모델 예측 및 검증 (Validation)":
                 "실제 측정치 (Ground Truth)": 300 + np.random.normal(0, 30, len(time_idx_val))
             })
 
-        # 앙상블 예측 수행
+        # 예측 수행
         X_target = df_val[['hour', 'minute', 'dayofweek']]
         pred_rf = rf_model.predict(X_target) if rf_model else 0
         if xgb_model is not None:
@@ -916,8 +770,8 @@ elif menu == "🔍 모델 예측 및 검증 (Validation)":
         else:
             predicted_vals = pred_rf
 
-        df_val['앙상블 예측치 (RF+XGB)'] = predicted_vals
-        df_val['잔차 (Residual)'] = df_val['실제 측정치 (Ground Truth)'] - df_val['앙상블 예측치 (RF+XGB)']
+        df_val['모델 예측치'] = predicted_vals
+        df_val['잔차 (Residual)'] = df_val['실제 측정치 (Ground Truth)'] - df_val['모델 예측치']
 
         residuals = df_val['잔차 (Residual)']
         actuals = df_val['실제 측정치 (Ground Truth)']
@@ -936,8 +790,8 @@ elif menu == "🔍 모델 예측 및 검증 (Validation)":
         
         st.divider()
 
-        st.subheader(f"📈 [{target_date_str}] 실제 측정값 vs 앙상블 예측치 비교 검증")
-        df_melted = df_val.melt("시간", value_vars=["실제 측정치 (Ground Truth)", "앙상블 예측치 (RF+XGB)"], var_name="구분", value_name="인원")
+        st.subheader(f"📈 [{target_date_str}] 실제 측정값 vs 모델 예측치 비교 검증")
+        df_melted = df_val.melt("시간", value_vars=["실제 측정치 (Ground Truth)", "모델 예측치"], var_name="구분", value_name="인원")
         val_chart = alt.Chart(df_melted).mark_line(point=True, strokeWidth=2.5).encode(
             x=alt.X('시간:T', title='타임라인', axis=alt.Axis(labelColor='#94a3b8', titleColor='#f8fafc')),
             y=alt.Y('인원:Q', title='체류 인원 (명)', axis=alt.Axis(labelColor='#94a3b8', titleColor='#f8fafc')),
@@ -947,6 +801,7 @@ elif menu == "🔍 모델 예측 및 검증 (Validation)":
             view=alt.ViewConfig(stroke=None)
         )
         st.altair_chart(val_chart, use_container_width=True)
+
 # ==========================================
 # 4. 📡 실시간 센서 파이프라인 (Live)
 # ==========================================
