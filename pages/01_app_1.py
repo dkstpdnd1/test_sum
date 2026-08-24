@@ -796,53 +796,67 @@ elif menu == "🗺️ 터미널 구역별 상세 분석":
 # ==========================================
 elif menu == "🔍 모델 예측 및 검증 (Validation)":
     st.title("🔍 인공지능 기반 여객 수요 예측 앙상블 모델 검증")
-    st.markdown(f"> **[모델 관리 및 검증 모드]** 깃허브 프로젝트 내(`pages/` 폴더 또는 루트)에 저장된 AI 모델 파일(`{RF_MODEL_PATH}`, `{XGB_MODEL_PATH}`)을 자동으로 탐색합니다.")
+    st.markdown("> **[모델 관리 및 검증 모드]** 깃허브 `pages/` 폴더 내에 통합 앙상블 모델 파일(`ensemble_traffic_model.pkl`)이 있는지 탐색합니다.")
 
-    # 1. 깃허브 및 로컬 경로 상에서 모델 파일 존재 여부 정밀 확인
-    rf_exists = os.path.exists(RF_MODEL_PATH)
-    xgb_exists = os.path.exists(XGB_MODEL_PATH)
+    # 1. 앙상블 통합 모델 파일 경로 설정 (pages 폴더 내부 기준)
+    ENSEMBLE_PATH = "pages/ensemble_traffic_model.pkl"
+    
+    # 만약 루트 폴더나 pages 폴더 중 어디에 있든 유연하게 찾도록 설정할 수도 있습니다.
+    if not os.path.exists(ENSEMBLE_PATH) and os.path.exists("ensemble_traffic_model.pkl"):
+        ENSEMBLE_PATH = "ensemble_traffic_model.pkl"
 
-    if rf_exists and xgb_exists:
-        st.success(f"✅ 깃허브 프로젝트 경로에서 앙상블 구성 모델을 정상적으로 불러왔습니다! (`{RF_MODEL_PATH}`, `{XGB_MODEL_PATH}`)")
+    ensemble_exists = os.path.exists(ENSEMBLE_PATH)
+
+    if ensemble_exists:
+        st.success(f"✅ 깃허브 프로젝트 경로에서 앙상블 모델 패키지(`{ENSEMBLE_PATH}`)를 성공적으로 불러왔습니다!")
     else:
-        st.warning("⚠️ **[안내]** 깃허브 pages 폴더 또는 프로젝트 루트에 필요한 모델 파일이 없습니다. 아래에서 모델을 새로 학습시켜 주세요.")
+        st.warning("⚠️ **[안내]** 깃허브 `pages` 폴더 내에 앙상블 모델 파일(`ensemble_traffic_model.pkl`)이 존재하지 않습니다. 상단의 **[앙상블 모델 학습 및 생성하기]** 버튼을 눌러 모델을 생성하거나 파일을 업로드해 주세요.")
 
     st.markdown("### ⚙️ AI 앙상블 모델 학습 제어 패널")
     
     # 학습 버튼 (사용자가 직접 누를 때만 동작)
     if st.button("🔄 9~10월 데이터로 앙상블 모델(RF + XGB) 학습 및 생성하기"):
-        with st.spinner("Random Forest와 XGBoost 모델을 모두 학습 및 앙상블 구성 중입니다..."):
-            success, msg = train_and_save_models()
+        with st.spinner("Random Forest와 XGBoost를 모두 학습하고 앙상블 패키지를 생성 중입니다..."):
+            success, msg = train_and_save_models() # 내부적으로 학습 후 앙상블 파일 저장 처리
             if success:
                 st.success(f"🎉 {msg}")
                 st.rerun()
             else:
                 st.error(f"❌ 학습 실패: {msg}")
 
-    # 2. 모델이 존재하거나 학습이 완료된 경우 앙상블 통합 다운로드 및 검증 진행
-    rf_model, xgb_model = load_precomputed_models()
+    # 2. 앙상블 파일 로드 (직접 불러오기 시도)
+    ensemble_model_pkg = None
+    if ensemble_exists:
+        try:
+            ensemble_model_pkg = joblib.load(ENSEMBLE_PATH)
+        except Exception as e:
+            st.error(f"❌ 앙상블 모델 파일을 불러오는 중 오류가 발생했습니다: {e}")
 
-    if rf_model is not None and xgb_model is not None:
+    # 3. 모델이 성공적으로 로드된 경우 (다운로드 버튼 및 예측 검증 진행)
+    if ensemble_model_pkg is not None:
         st.markdown("---")
-        st.markdown("##### 📥 최종 앙상블 패키지 다운로드")
+        st.markdown("##### 📥 앙상블 모델 패키지 다운로드")
         
-        # 랜덤포레스트와 XGBoost를 함께 묶은 앙상블 패키지 딕셔너리 생성
-        ensemble_package = {
-            "rf_model": rf_model,
-            "xgb_model": xgb_model,
-            "weights": [0.5, 0.5]
-        }
-        ensemble_bytes = joblib.dumps(ensemble_package)
-        
-        st.download_button(
-            label="📥 앙상블 모델 패키지 다운로드 (.pkl) (RF + XGB 통합)",
-            data=ensemble_bytes,
-            file_name="ensemble_traffic_model.pkl",
-            mime="application/octet-stream"
-        )
-        st.info("💡 다운로드하신 `ensemble_traffic_model.pkl` 파일을 깃허브 `test_sum` 프로젝트(pages 폴더 또는 루트)에 업로드해 두시면, 다음부터는 학습 버튼을 누르지 않아도 자동으로 앙상블 예측을 수행합니다!")
+        # 파일 바이너리를 읽어 다운로드 버튼 제공
+        with open(ENSEMBLE_PATH, "rb") as f:
+            st.download_button(
+                label="📥 앙상블 모델 패키지 다운로드 (.pkl) (통합)",
+                data=f,
+                file_name="ensemble_traffic_model.pkl",
+                mime="application/octet-stream"
+            )
+        st.info("💡 다운로드하신 `ensemble_traffic_model.pkl` 파일을 깃허브 `pages/` 폴더에 업로드해 두시면, 다음부터는 학습 버튼을 누르지 않아도 자동으로 앙상블 예측을 수행합니다!")
 
         st.divider()
+
+        # 앙상블 모델 구조 추출 (딕셔너리 형태이거나 개별 모델인 경우 모두 대응)
+        if isinstance(ensemble_model_pkg, dict):
+            rf_model = ensemble_model_pkg.get("rf_model")
+            xgb_model = ensemble_model_pkg.get("xgb_model")
+        else:
+            # 혹시 모델 객체 자체가 저장된 경우의 방어 코드
+            rf_model = ensemble_model_pkg
+            xgb_model = None
 
         # 예측 및 검증 로직 실행
         if exists and past_time_data:
@@ -873,11 +887,15 @@ elif menu == "🔍 모델 예측 및 검증 (Validation)":
                 "실제 측정치 (Ground Truth)": 300 + np.random.normal(0, 30, len(time_idx_val))
             })
 
-        # 앙상블 예측 수행 (RF 50% + XGB 50%)
+        # 앙상블 예측 수행 (RF + XGB 결합)
         X_target = df_val[['hour', 'minute', 'dayofweek']]
-        pred_rf = rf_model.predict(X_target)
-        pred_xgb = xgb_model.predict(X_target)
-        predicted_vals = (0.5 * pred_rf) + (0.5 * pred_xgb)
+        
+        pred_rf = rf_model.predict(X_target) if rf_model else 0
+        if xgb_model is not None:
+            pred_xgb = xgb_model.predict(X_target)
+            predicted_vals = (0.5 * pred_rf) + (0.5 * pred_xgb)
+        else:
+            predicted_vals = pred_rf # XGB가 없을 경우 RF 단독 적용 방어
 
         df_val['앙상블 예측치 (RF+XGB)'] = predicted_vals
         df_val['잔차 (Residual)'] = df_val['실제 측정치 (Ground Truth)'] - df_val['앙상블 예측치 (RF+XGB)']
@@ -911,7 +929,8 @@ elif menu == "🔍 모델 예측 및 검증 (Validation)":
         )
         st.altair_chart(val_chart, use_container_width=True)
     else:
-        st.error(f"⚠️ 깃허브 pages 폴더 내에 앙상블 모델 파일(`{RF_MODEL_PATH}` 또는 `{XGB_MODEL_PATH}`)이 존재하지 않습니다. 상단의 **[앙상블 모델 학습 및 생성하기]** 버튼을 눌러 모델을 생성하시거나 파일을 업로드해 주세요.")
+        # 모델이 없을 때 깔끔하게 경고창만 띄우고 불필요한 에러 방지
+        st.info("👆 위쪽의 **[앙상블 모델 학습 및 생성하기]** 버튼을 눌러 새로운 앙상블 모델을 빌드해 주세요.")
 # ==========================================
 # 4. 📡 실시간 센서 파이프라인 (Live)
 # ==========================================
