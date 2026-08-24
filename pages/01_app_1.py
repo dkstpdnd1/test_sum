@@ -813,36 +813,38 @@ elif menu == "🔍 모델 예측 및 검증 (Validation)":
             success, msg = train_and_save_models()
             if success:
                 st.success(f"🎉 {msg}")
-                # 파일 생성 직후 상태 즉시 반영을 위해 재실행
+                # ⭐ 핵심: 학습이 성공했음을 세션 상태에 기록하여 즉시 반영합니다.
+                st.session_state["model_just_trained"] = True
                 st.rerun()
             else:
                 st.error(f"❌ 학습 실패: {msg}")
 
-    # 파일 존재 여부 재확인 (학습 직후 반영 위함)
-    ensemble_exists = os.path.exists(ENSEMBLE_PATH)
+    # 파일 존재 여부 재확인 + 방금 학습 완료된 상태 체크
+    ensemble_exists = os.path.exists(ENSEMBLE_PATH) or st.session_state.get("model_just_trained", False)
 
     if ensemble_exists:
-        st.success(f"✅ 앙상블 모델 패키지(`{ENSEMBLE_PATH}`)가 준비되어 있습니다!")
+        st.success(f"✅ 앙상블 모델 패키지가 준비되어 있습니다!")
         
-        # ⭐ [핵심] 파일이 존재하기만 하면 무조건 다운로드 버튼을 화면에 고정 출력합니다.
-        st.markdown("---")
-        st.markdown("##### 📥 앙상블 모델 패키지 다운로드")
-        
-        with open(ENSEMBLE_PATH, "rb") as f:
-            st.download_button(
-                label="📥 앙상블 모델 패키지 다운로드 (.pkl) (통합)",
-                data=f,
-                file_name="ensemble_traffic_model.pkl",
-                mime="application/octet-stream",
-                key="download_ensemble_pkl_btn"
-            )
-        st.info("💡 다운로드하신 `ensemble_traffic_model.pkl` 파일을 깃허브 `pages/` 폴더에 업로드해 두시면, 다음부터는 학습 버튼을 누르지 않아도 자동으로 앙상블 예측을 수행합니다!")
+        # ⭐ 파일이 실제로 존재하는지 한 번 더 확인 후 다운로드 버튼 생성
+        if os.path.exists(ENSEMBLE_PATH):
+            st.markdown("---")
+            st.markdown("##### 📥 앙상블 모델 패키지 다운로드")
+            
+            with open(ENSEMBLE_PATH, "rb") as f:
+                st.download_button(
+                    label="📥 앙상블 모델 패키지 다운로드 (.pkl) (통합)",
+                    data=f,
+                    file_name="ensemble_traffic_model.pkl",
+                    mime="application/octet-stream",
+                    key="download_ensemble_pkl_btn"
+                )
+            st.info("💡 다운로드하신 `ensemble_traffic_model.pkl` 파일을 깃허브 `pages/` 폴더에 업로드해 두시면, 다음부터는 학습 버튼을 누르지 않아도 자동으로 앙상블 예측을 수행합니다!")
 
         st.divider()
 
         # 3. 모델 로드 및 검증 수행
         try:
-            ensemble_model_pkg = joblib.load(ENSEMBLE_PATH)
+            ensemble_model_pkg = joblib.load(ENSEMBLE_PATH) if os.path.exists(ENSEMBLE_PATH) else None
         except Exception as e:
             ensemble_model_pkg = None
             st.error(f"❌ 앙상블 모델 파일을 불러오는 중 오류가 발생했습니다: {e}")
