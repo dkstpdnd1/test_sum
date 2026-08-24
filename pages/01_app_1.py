@@ -806,14 +806,19 @@ elif menu == "🔍 모델 예측 및 검증 (Validation)":
                 total_p = sum({k: v for k, v in past_time_data[t_idx]['counts'].items() if k not in ["GH", "IM1", "IM2", "Outside"]}.values())
                 total_sec = int(t_idx) * 10
                 h, m = total_sec // 3600, (total_sec % 3600) // 60
+                # 날짜와 시간을 포맷을 명시하여 안전하게 변환 (에러 발생 시 NaT 처리 후 필터링)
+                time_str = f"{target_date_str} {int(h):02d}:{int(m):02d}:00"
+                parsed_time = pd.to_datetime(time_str, format="%Y-%m-%d %H:%M:%S", errors="coerce")
+                
                 val_rows.append({
-                    "시간": pd.to_datetime(f"{target_date_str} {h:02d}:{m:02d}:00"),
+                    "시간": parsed_time,
                     "hour": h,
                     "minute": m,
                     "dayofweek": selected_date.weekday(),
                     "실제 측정치 (Ground Truth)": total_p
                 })
             df_val = pd.DataFrame(val_rows)
+            df_val = df_val.dropna(subset=["시간"])  # 잘못된 날짜 형식으로 변환 실패한 행 제거
         else:
             time_idx_val = pd.date_range(f"{target_date_str} 06:00:00", f"{target_date_str} 22:00:00", freq="30min")
             df_val = pd.DataFrame({
