@@ -732,6 +732,9 @@ elif menu == "🔍 모델 예측 및 검증 (Validation)":
         st.success("✅ 사전 학습된 예측 모델을 성공적으로 불러왔습니다.")
         st.divider()
 
+        # 사이드바 혹은 상단에 검증 그래프용 이동평균 설정 추가
+        val_window = st.sidebar.slider("검증 그래프 이동평균 윈도우 크기", min_value=1, max_value=15, value=5, step=1)
+
         # 예측 및 검증 로직 실행
         if exists and past_time_data:
             val_rows = []
@@ -771,6 +774,11 @@ elif menu == "🔍 모델 예측 및 검증 (Validation)":
             predicted_vals = pred_rf
 
         df_val['모델 예측치'] = predicted_vals
+        
+        # 이동평균 적용 (노이즈 완화)
+        df_val['실제 측정치 (Ground Truth)'] = df_val['실제 측정치 (Ground Truth)'].rolling(window=val_window, min_periods=1, center=True).mean()
+        df_val['모델 예측치'] = df_val['모델 예측치'].rolling(window=val_window, min_periods=1, center=True).mean()
+
         df_val['잔차 (Residual)'] = df_val['실제 측정치 (Ground Truth)'] - df_val['모델 예측치']
 
         residuals = df_val['잔차 (Residual)']
@@ -790,9 +798,11 @@ elif menu == "🔍 모델 예측 및 검증 (Validation)":
         
         st.divider()
 
-        st.subheader(f"📈 [{target_date_str}] 실제 측정값 vs 모델 예측치 비교 검증")
+        st.subheader(f"📈 [{target_date_str}] 실제 측정값 vs 모델 예측치 비교 검증 (이동평균 적용)")
         df_melted = df_val.melt("시간", value_vars=["실제 측정치 (Ground Truth)", "모델 예측치"], var_name="구분", value_name="인원")
-        val_chart = alt.Chart(df_melted).mark_line(point=True, strokeWidth=2.5).encode(
+        
+        # 선 두께(strokeWidth)를 1.2로 슬림하게 조정
+        val_chart = alt.Chart(df_melted).mark_line(point=False, strokeWidth=1.2).encode(
             x=alt.X('시간:T', title='타임라인', axis=alt.Axis(labelColor='#94a3b8', titleColor='#f8fafc')),
             y=alt.Y('인원:Q', title='체류 인원 (명)', axis=alt.Axis(labelColor='#94a3b8', titleColor='#f8fafc')),
             color=alt.Color('구분:N', scale=alt.Scale(range=['#10b981', '#38bdf8']))
