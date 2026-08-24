@@ -590,7 +590,7 @@ if menu == "🚨 통합 관제 상황판 (Dashboard)":
             st.subheader("🗺️ 아카이브 공간 밀집도 히트맵")
             heatmap = generate_density_heatmap(area_df, filtered_counts, bg_img.shape)
             blended = cv2.addWeighted(bg_img, 0.55, heatmap, 0.45, 0)
-            st.image(cv2.cvtColor(blended, cv2.COLOR_BGR2RGB), width="content")
+            st.image(cv2.cvtColor(blended, cv2.COLOR_BGR2RGB), width=700)
             
         with c2:
             st.subheader("📊 해당 시점 혼잡 Top 5 구역")
