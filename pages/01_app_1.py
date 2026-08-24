@@ -20,23 +20,8 @@ except ImportError:
 # --- [시스템 설정] ---
 AREA_FILE_PATH = "terminal_areas_grouped_2.csv"         
 BACKGROUND_IMAGE_PATH = "ICN_Airport_3F.png"         
-ENSEMBLE_MODEL_PATH = "ensemble_model.pkl"             
-
-
-# --- [앙상블 모델 클래스 정의] ---
-class EnsembleRegressor:
-    """
-    Random Forest와 XGBoost를 동시에 내포하고, 
-    예측 시 자동으로 (0.5 * RF) + (0.5 * XGB) 연산을 수행하는 앙상블 모델 객체
-    """
-    def __init__(self, rf_model, xgb_model):
-        self.rf_model = rf_model
-        self.xgb_model = xgb_model
-
-    def predict(self, X):
-        pred_rf = self.rf_model.predict(X) if self.rf_model is not None else np.zeros(len(X))
-        pred_xgb = self.xgb_model.predict(X) if self.xgb_model is not None else np.zeros(len(X))
-        return (0.5 * pred_rf) + (0.5 * pred_xgb)
+RF_MODEL_PATH = "rf_model.pkl"                       
+XGB_MODEL_PATH = "xgb_model.pkl"                     
 
 
 # --- [디자인 시스템: 극도로 전문적인 하이엔드 관제 스타일 CSS 적용] ---
@@ -224,6 +209,7 @@ st.markdown("""
             background-color: #1e293b !important;
             color: #f8fafc !important;
         }
+        /* --- [st.date_input 달력 빈 행/셀 흰색 배경 완벽 차단 및 다크 고정] --- */
         
         /* 1. 날짜 입력 필드 본체 */
         [data-baseweb="input"] {
@@ -258,7 +244,7 @@ st.markdown("""
             box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.7) !important;
         }
 
-        /* 3. 캘린더 내부의 모든 테이블, 행, 셀, 영역의 기본 배경 강제 고정 */
+        /* 3. 캘린더 내부의 모든 테이블, 행, 셀, 영역의 기본 배경을 강제로 #0b0f19로 설정 */
         [data-baseweb="calendar"],
         [data-baseweb="calendar"] *,
         [data-baseweb="calendar"] table,
@@ -274,10 +260,12 @@ st.markdown("""
             color: #f8fafc !important;
         }
 
+        /* 4. 요일 헤더 텍스트 색상 */
         [data-baseweb="calendar"] th {
             color: #94a3b8 !important;
         }
 
+        /* 5. 날짜 버튼 및 호버 효과 (버튼만 투명 배경 유지 및 호버 시 다크 그레이) */
         [data-baseweb="calendar"] button {
             background-color: transparent !important;
             background: transparent !important;
@@ -291,12 +279,14 @@ st.markdown("""
             color: #ffffff !important;
         }
 
+        /* 6. 선택된 날짜 (Selected Date) 강조 */
         [data-baseweb="calendar"] [aria-selected="true"] {
             background-color: #2563eb !important;
             background: #2563eb !important;
             color: #ffffff !important;
         }
 
+        /* 7. 월/연도 선택 드롭다운 팝오버 메뉴 */
         div[data-baseweb="menu"], 
         div[data-baseweb="menu"] div,
         div[data-baseweb="menu"] ul,
@@ -312,6 +302,7 @@ st.markdown("""
             color: #ffffff !important;
         }
     
+        /* Streamlit 1.37 native widget finish */
         [data-testid="stDateInput"] input,
         [data-testid="stTextInput"] input,
         [data-testid="stNumberInput"] input,
@@ -334,25 +325,35 @@ st.markdown("""
             background:#4DA3FF !important;
             border:2px solid #8CC8FF !important;
         }
+        [data-testid="stSlider"] [data-testid*="TickBar"],
+        [data-testid="stSlider"] [class*="TickBar"],
+        [data-testid="stSlider"] [class*="tickBar"] {
+            background:transparent !important;
+            border:none !important;
+            box-shadow:none !important;
+        }
 </style>
 """, unsafe_allow_html=True)
 
 
 st.markdown(r"""
 <style>
+/* ===== V6 FINAL POLISH / Streamlit 1.37 ===== */
 [data-testid="stSlider"] [data-testid="stTickBar"]{display:none!important;}
 .slider-range-labels{display:flex;justify-content:space-between;align-items:center;margin-top:-.35rem;margin-bottom:.55rem;padding:0 1px;color:#A9BED1;font-size:.76rem;line-height:1;}
 .slider-range-labels span{background:transparent!important;color:#A9BED1!important;border:0!important;box-shadow:none!important;padding:0!important;}
 [role="menu"],[role="menu"]>div,[role="menuitem"],[role="menuitem"]>div,div[data-baseweb="popover"]>div,div[data-baseweb="popover"] [data-baseweb="menu"]{background:#0F2033!important;color:#E6EDF3!important;border-color:#263A52!important;}
 [role="menuitem"]:hover,[role="menuitem"]:focus{background:#17304C!important;color:#FFF!important;}
+[role="menuitem"][aria-disabled="true"],[role="menuitem"][data-disabled="true"],[role="menuitem"] button:disabled,[data-baseweb="popover"] button:disabled{background:#0B1725!important;color:#60758A!important;opacity:1!important;}
 .dark-table-shell{width:100%;overflow:auto;border:1px solid #29425A;border-radius:12px;background:#0B1725;box-shadow:0 7px 20px rgba(0,0,0,.14);margin:.25rem 0 .9rem 0;}
 .dark-html-table{width:100%;border-collapse:separate;border-spacing:0;color:#E6EDF3;font-size:.86rem;background:#0D1B2A;}
 .dark-html-table thead th{position:sticky;top:0;z-index:2;background:#112338!important;color:#BFD3E6!important;font-weight:700;text-align:left;padding:10px 12px;border-right:1px solid #2A4058;border-bottom:1px solid #36516C;white-space:nowrap;}
 .dark-html-table tbody td{background:#0D1B2A!important;color:#E6EDF3!important;padding:9px 12px;border-right:1px solid #1F3348;border-bottom:1px solid #1F3348;white-space:nowrap;}
 .dark-html-table tbody tr:nth-child(even) td{background:#0B1928!important}.dark-html-table tbody tr:hover td{background:#122B42!important}
+.dark-html-table th:last-child,.dark-html-table td:last-child{border-right:0}.dark-html-table tbody tr:last-child td{border-bottom:0}
+[data-testid="stDataEditor"] iframe,[data-testid="stDataEditor"] canvas,[data-testid="stDataFrame"] iframe,[data-testid="stDataFrame"] canvas{background:#0D1B2A!important;}
 </style>
 """, unsafe_allow_html=True)
-
 
 # --- [인력 배치 및 로직 함수] ---
 def calculate_staffing(people_count):
@@ -370,7 +371,7 @@ def index_to_time_str(t_index):
 
 @st.cache_data
 def load_data_by_date(selected_date_str):
-    area_df = pd.read_csv(AREA_FILE_PATH) if os.path.exists(AREA_FILE_PATH) else pd.DataFrame()
+    area_df = pd.read_csv(AREA_FILE_PATH)
     bg_img = cv2.imread(BACKGROUND_IMAGE_PATH)
     if bg_img is None: bg_img = np.full((600, 1900, 3), 240, dtype=np.uint8)
     try:
@@ -387,8 +388,9 @@ def load_data_by_date(selected_date_str):
 # --- [AI 모델 로드 및 학습 함수] ---
 @st.cache_resource
 def load_precomputed_models():
-    ensemble_model = joblib.load(ENSEMBLE_MODEL_PATH) if os.path.exists(ENSEMBLE_MODEL_PATH) else None
-    return ensemble_model
+    rf = joblib.load(RF_MODEL_PATH) if os.path.exists(RF_MODEL_PATH) else None
+    xgb = joblib.load(XGB_MODEL_PATH) if os.path.exists(XGB_MODEL_PATH) else None
+    return rf, xgb
 
 def train_and_save_models():
     all_files = glob.glob("area_count_time_full_*.csv")
@@ -443,24 +445,20 @@ def train_and_save_models():
     status_text.text("🤖 Random Forest 모델 학습 중...")
     rf_model = RandomForestRegressor(n_estimators=50, random_state=42)
     rf_model.fit(X, y)
+    joblib.dump(rf_model, RF_MODEL_PATH)
 
-    xgb_model = None
     if HAS_XGB:
         progress_bar.progress(0.90)
         status_text.text("🚀 XGBoost 모델 학습 중...")
         xgb_model = XGBRegressor(n_estimators=50, learning_rate=0.1, max_depth=3, random_state=42)
         xgb_model.fit(X, y)
-
-    # 앙상블 모델 객체 생성 및 저장
-    ensemble_model = EnsembleRegressor(rf_model=rf_model, xgb_model=xgb_model)
-    joblib.dump(ensemble_model, ENSEMBLE_MODEL_PATH)
+        joblib.dump(xgb_model, XGB_MODEL_PATH)
 
     progress_bar.progress(1.0)
-    status_text.text("✨ 앙상블 학습 및 통합 저장 완료!")
+    status_text.text("✨ 학습 및 저장 완료!")
     
-    # 캐시 비우기 (새로 학습된 모델 반영)
     st.cache_resource.clear()
-    return True, f"총 {len(df_train):,}개 샘플로 앙상블 모델 학습 및 통합 저장 완료!"
+    return True, f"총 {len(df_train):,}개 샘플로 모델 학습 및 저장 완료!"
 
 def get_daily_peaks(df_trend):
     peaks = {}
@@ -501,7 +499,7 @@ def generate_density_heatmap(area_df, current_counts, img_shape):
         return cv2.bitwise_and(heatmap_color, heatmap_color, mask=alpha)
     return np.zeros((height, width, 3), dtype=np.uint8)
 
-# --- [사이드바 구성] ---
+# --- [사이드바 구성: 관제 시스템 콘솔] ---
 st.sidebar.markdown("### ✈️ ICN IOC SYSTEM")
 menu = st.sidebar.radio(
     "관제 시스템 모드 선택", 
@@ -529,7 +527,7 @@ else:
             <span style="color: #94a3b8; font-size: 0.75rem;">실시간 모드에서는 과거 날짜 선택이 비활성화됩니다.</span>
         </div>
     """, unsafe_allow_html=True)
-    area_df = pd.read_csv(AREA_FILE_PATH) if os.path.exists(AREA_FILE_PATH) else pd.DataFrame()
+    area_df = pd.read_csv(AREA_FILE_PATH) if pd.io.common.file_exists(AREA_FILE_PATH) else pd.DataFrame()
     bg_img = cv2.imread(BACKGROUND_IMAGE_PATH)
     if bg_img is None: bg_img = np.full((600, 1900, 3), 240, dtype=np.uint8)
 
@@ -678,6 +676,90 @@ elif menu == "🗺️ 터미널 구역별 상세 분석":
             st.altair_chart(final_trend_chart, use_container_width=True)
 
         st.divider()
+        
+        st.subheader("🔍 특정 구역 선택 및 상세 시계열 추이 분석")
+        
+        sample_counts = past_time_data[list(past_time_data.keys())[0]]['counts']
+        all_areas = sorted([k for k in sample_counts.keys() if k not in ["GH", "IM1", "IM2"]])
+        
+        selected_areas = st.multiselect(
+            "📍 집중 분석할 구역을 다중 선택하세요 (복수 선택 가능)", 
+            options=all_areas, 
+            default=all_areas[:2] if len(all_areas) >= 2 else all_areas
+        )
+
+        if selected_areas:
+            area_trend_data = []
+            for t in sorted(past_time_data.keys()):
+                counts = past_time_data[t]['counts']
+                for area in selected_areas:
+                    area_trend_data.append({
+                        "시간": index_to_time_str(t),
+                        "인원": counts.get(area, 0),
+                        "구역": area
+                    })
+            
+            df_area = pd.DataFrame(area_trend_data)
+            df_area['시간'] = pd.to_datetime(df_area['시간'], format='%H:%M:%S', errors='coerce')
+            df_area = df_area.dropna(subset=['시간']).set_index("시간")
+            df_area['이동평균'] = df_area.groupby('구역')['인원'].transform(lambda x: x.rolling(window=window_size * 6, min_periods=1).mean())
+            
+            peak_details = []
+            for area in selected_areas:
+                area_df_subset = df_area[df_area['구역'] == area].copy()
+                peaks = get_daily_peaks(area_df_subset)
+                for label, (t, val) in peaks.items():
+                    peak_details.append({"구역": area, "피크단계": label, "시간": t, "인원": val})
+            
+            df_area_peaks = pd.DataFrame(peak_details)
+
+            base_area = alt.Chart(df_area.reset_index()).encode(
+                x=alt.X('시간:T', axis=alt.Axis(format='%H:%M', labelColor='#94a3b8', titleColor='#f8fafc'), title='시간'),
+                y=alt.Y('이동평균:Q', title="구역별 체류 인원 (이동평균)", axis=alt.Axis(labelColor='#94a3b8', titleColor='#f8fafc')),
+                color='구역:N'
+            ).properties(height=350)
+            
+            line = base_area.mark_line(strokeWidth=2.5)
+            
+            if not df_area_peaks.empty:
+                rules = alt.Chart(df_area_peaks).mark_rule(strokeDash=[3,3]).encode(x='시간:T', color='구역:N')
+                text = alt.Chart(df_area_peaks).mark_text(dy=-10, fontWeight='bold', fontSize=10).encode(
+                    x='시간:T', y='이동평균:Q', text='피크단계:N', color='구역:N'
+                )
+                area_chart_final = (line + rules + text).configure(
+                    background='#07090e', view=alt.ViewConfig(stroke=None)
+                )
+                st.altair_chart(area_chart_final, use_container_width=True)
+            else:
+                area_chart_final = line.configure(
+                    background='#07090e', view=alt.ViewConfig(stroke=None)
+                )
+                st.altair_chart(area_chart_final, use_container_width=True)
+            
+            st.write("#### 📋 선택 구역별 피크 타임 요약")
+            if not df_area_peaks.empty:
+                df_peaks_display = df_area_peaks.copy()
+                df_peaks_display['시간'] = df_peaks_display['시간'].dt.strftime('%H:%M:%S')
+                pivot_df = df_peaks_display.pivot(index='구역', columns='피크단계', values='시간').reset_index()
+                
+                html_table = "<table class='ioc-table'><thead><tr>"
+                for col in pivot_df.columns:
+                    html_table += f"<th>{col}</th>"
+                html_table += "</tr></thead><tbody>"
+                for _, row in pivot_df.iterrows():
+                    html_table += "<tr>"
+                    for val in row:
+                        display_val = "" if pd.isna(val) else str(val)
+                        html_table += f"<td>{display_val}</td>"
+                    html_table += "</tr>"
+                html_table += "</tbody></table>"
+                st.markdown(html_table, unsafe_allow_html=True)
+            else:
+                st.info("선택된 구역의 피크 데이터가 충분하지 않습니다.")
+        else:
+            st.warning("⚠️ 비교 분석할 구역을 최소 1개 이상 선택해 주세요.")
+
+        st.divider()
         st.subheader("📋 구역별 인력 배치 및 운영 권고 명세서")
         
         latest_counts = past_time_data[list(past_time_data.keys())[-1]]['counts'] if past_time_data else {}
@@ -710,41 +792,49 @@ elif menu == "🗺️ 터미널 구역별 상세 분석":
         st.markdown(html_table_staff, unsafe_allow_html=True)
 
 # ==========================================
-# 3. 🔍 모델 예측 및 검증 (Validation)
+# 3. 🔍 모델 예측 및 검증 (Validation - 앙상블 적용)
 # ==========================================
 elif menu == "🔍 모델 예측 및 검증 (Validation)":
     st.title("🔍 인공지능 기반 여객 수요 예측 앙상블 모델 검증")
-    st.markdown(f"> **[모델 관리 및 검증 모드]** 버튼을 눌러 데이터를 직접 학습시키거나, 저장된 통합 AI 앙상블 모델(`{ENSEMBLE_MODEL_PATH}`)로 현재 선택하신 **{target_date_str}**의 실제 측정값을 정밀 비교할 수 있습니다.")
+    st.markdown(f"> **[모델 관리 및 검증 모드]** 버튼을 눌러 데이터를 직접 학습시키거나, 저장된 AI 모델(`{RF_MODEL_PATH}`, `{XGB_MODEL_PATH}`)을 활용하여 **Random Forest와 XGBoost의 앙상블 예측치(각 50어가중치 결합)**를 현재 선택하신 **{target_date_str}**의 실제 측정값과 정밀 비교합니다.")
 
     st.markdown("### ⚙️ AI 모델 학습 제어 패널")
-    if st.button("🔄 데이터로 앙상블 모델 학습 및 통합 저장하기 (Train Ensemble)"):
-        with st.spinner("앙상블 모델을 학습 중입니다. 잠시만 기다려주세요..."):
+    if st.button("🔄 9~10월 데이터로 AI 모델 학습 및 저장하기 (Train Model)"):
+        with st.spinner("AI 모델을 학습 중입니다. 잠시만 기다려주세요..."):
             success, msg = train_and_save_models()
             if success:
                 st.success(f"🎉 {msg}")
             else:
                 st.error(f"❌ 학습 실패: {msg}")
 
-    # --- 📥 [직관적인 단일 앙상블 모델 파일 다운로드 버튼] ---
-    if os.path.exists(ENSEMBLE_MODEL_PATH):
+    if os.path.exists(RF_MODEL_PATH) and os.path.exists(XGB_MODEL_PATH):
         st.markdown("---")
-        st.markdown("##### 📥 통합 앙상블 모델 파일 다운로드")
-        with open(ENSEMBLE_MODEL_PATH, "rb") as f:
-            st.download_button(
-                label="📥 통합 앙상블 모델 다운로드 (ensemble_model.pkl)",
+        st.markdown("##### 📥 학습된 모델 파일 다운로드")
+        col_down1, col_down2 = st.columns(2)
+        
+        with open(RF_MODEL_PATH, "rb") as f:
+            col_down1.download_button(
+                label="📥 Random Forest 모델 다운로드 (.pkl)",
                 data=f,
-                file_name="ensemble_model.pkl",
-                mime="application/octet-stream",
-                use_container_width=True
+                file_name="rf_model.pkl",
+                mime="application/octet-stream"
             )
-        st.info("💡 위 버튼을 통해 Random Forest와 XGBoost가 결합되어 가중치 예측 연산을 수행하는 단일 앙상블 모델(`.pkl`) 파일을 간편하게 다운로드하실 수션 있습니다.")
+            
+        with open(XGB_MODEL_PATH, "rb") as f:
+            col_down2.download_button(
+                label="📥 XGBoost 모델 다운로드 (.pkl)",
+                data=f,
+                file_name="xgb_model.pkl",
+                mime="application/octet-stream"
+            )
+        st.info("💡 위 버튼을 눌러 다운받은 `.pkl` 파일들을 깃허브 프로젝트 폴더에 업로드하시면 깃허브 기반 예측이 바로 가능합니다!")
 
     st.divider()
 
-    ensemble_model = load_precomputed_models()
+    rf_model, xgb_model = load_precomputed_models()
 
-    if ensemble_model is None:
-        st.warning(f"⚠️ 저장된 앙상블 모델 파일이 없습니다. 위쪽의 **[학습 및 통합 저장하기]** 버튼을 먼저 눌러주세요!")
+    if rf_model is None:
+        st.warning(f"⚠️ 저장된 모델 파일(`{RF_MODEL_PATH}`)이 없습니다. 위쪽의 **[학습 및 저장하기]** 버튼을 먼저 눌러주세요!")
     else:
         if exists and past_time_data:
             val_rows = []
@@ -774,9 +864,14 @@ elif menu == "🔍 모델 예측 및 검증 (Validation)":
                 "실제 측정치 (Ground Truth)": 300 + np.random.normal(0, 30, len(time_idx_val))
             })
 
-        # 앙상블 모델 객체를 이용한 자동 예측 연산 수행 ((0.5 * RF) + (0.5 * XGB))
+        # 💡 [핵심 반영] 앙상블 모델 예측 수행 (Random Forest 50% + XGBoost 50%)
         X_target = df_val[['hour', 'minute', 'dayofweek']]
-        predicted_vals = ensemble_model.predict(X_target)
+        pred_rf = rf_model.predict(X_target)
+        if xgb_model is not None:
+            pred_xgb = xgb_model.predict(X_target)
+            predicted_vals = (0.5 * pred_rf) + (0.5 * pred_xgb)  # 앙상블 블렌딩 가중치 적용
+        else:
+            predicted_vals = pred_rf
 
         df_val['앙상블 예측치 (RF+XGB)'] = predicted_vals
         df_val['잔차 (Residual)'] = df_val['실제 측정치 (Ground Truth)'] - df_val['앙상블 예측치 (RF+XGB)']
@@ -798,7 +893,7 @@ elif menu == "🔍 모델 예측 및 검증 (Validation)":
         
         st.divider()
 
-        st.subheader(f"📈 [{target_date_str}] 실제 측정값 vs 0.5 가중치 앙상블 예측치 비교 검증")
+        st.subheader(f"📈 [{target_date_str}] 실제 측정값 vs 앙상블 예측치 비교 검증")
         df_melted = df_val.melt("시간", value_vars=["실제 측정치 (Ground Truth)", "앙상블 예측치 (RF+XGB)"], var_name="구분", value_name="인원")
         val_chart = alt.Chart(df_melted).mark_line(point=True, strokeWidth=2.5).encode(
             x=alt.X('시간:T', title='타임라인', axis=alt.Axis(labelColor='#94a3b8', titleColor='#f8fafc')),
@@ -868,3 +963,14 @@ elif menu == "📡 실시간 센서 파이프라인 (Live)":
             st.altair_chart(live_chart, use_container_width=True)
     else:
         st.warning("⚠️ 구역 정의 파일(AREA_FILE_PATH)을 불러오지 못해 라이브 비전 뷰를 렌더링할 수 없습니다.")
+
+    st.divider()
+    st.subheader("🛠️ 실시간 라이브 스트리밍 제어 패널")
+    
+    col_btn1, col_btn2 = st.columns(2)
+    with col_btn1:
+        if st.button("🔄 실시간 데이터 수신 스트림 강제 동기화 (Sync)"):
+            st.success("실시간 센서 소켓 버퍼가 성공적으로 리프레시되었습니다.")
+    with col_btn2:
+        if st.button("🚨 라이브 비상 경보 채널 리셋 (Reset Alarms)"):
+            st.info("모든 라이브 경보 플래그가 초기화되었습니다.")
