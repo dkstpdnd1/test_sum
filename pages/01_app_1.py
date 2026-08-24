@@ -796,142 +796,157 @@ elif menu == "🗺️ 터미널 구역별 상세 분석":
 # ==========================================
 elif menu == "🔍 모델 예측 및 검증 (Validation)":
     st.title("🔍 인공지능 기반 여객 수요 예측 앙상블 모델 검증")
-    st.markdown("> **[모델 관리 및 검증 모드]** 모델 학습 및 파일 다운로드 제어 패널")
+    st.markdown("> **[모델 관리 및 검증 모드]** 모델을 학습하고 곧바로 다운로드합니다.")
 
     # 1. 파일 경로 탐색
     ENSEMBLE_PATH = "pages/ensemble_traffic_model.pkl"
     if not os.path.exists(ENSEMBLE_PATH) and os.path.exists("ensemble_traffic_model.pkl"):
         ENSEMBLE_PATH = "ensemble_traffic_model.pkl"
 
-    # 2. 학습 제어 패널
-    st.markdown("### ⚙️ AI 앙상블 모델 학습 제어 패널")
+    # 2. 학습 및 메모리 다운로드 제어 패널
+    st.markdown("### ⚙️ AI 앙상블 모델 학습 및 다운로드 제어 패널")
     
-    if st.button("🔄 9~10월 데이터로 앙상블 모델(RF + XGB) 학습 및 생성하기"):
-        with st.spinner("Random Forest와 XGBoost를 모두 학습하고 앙상블 패키지를 생성 중입니다..."):
+    # 세션 상태에 다운로드용 바이트 데이터 저장 공간 확보
+    if "model_bytes" not in st.session_state:
+        st.session_state["model_bytes"] = None
+
+    if st.button("🔄 9~10월 데이터로 앙상블 모델(RF + XGB) 학습 및 다운로드 파일 생성"):
+        with st.spinner("Random Forest와 XGBoost를 모두 학습하고 있습니다..."):
             success, msg = train_and_save_models()
             if success:
                 st.success(f"🎉 {msg}")
-                st.session_state["model_just_trained"] = True
+                
+                # ⭐ 핵심: 디스크 파일뿐만 아니라 메모리(Bytes)에도 패키지를 로드하여 즉시 다운로드 준비
+                target_path = ENSEMBLE_PATH if os.path.exists(ENSEMBLE_PATH) else "ensemble_traffic_model.pkl"
+                if os.path.exists(target_path):
+                    with open(target_path, "rb") as f:
+                        st.session_state["model_bytes"] = f.read()
                 st.rerun()
             else:
                 st.error(f"❌ 학습 실패: {msg}")
 
     st.markdown("---")
-    
-    # 🚨 [무조건 상시 노출 영역] 파일이 있거나 방금 학습했으면 실제 파일 다운로드, 아니면 안내 메시지 띄우기
     st.markdown("##### 📥 깃허브 업로드용 앙상블 모델 패키지 다운로드")
-    
-    is_ready = os.path.exists(ENSEMBLE_PATH) or st.session_state.get("model_just_trained", False)
 
-    if is_ready and os.path.exists(ENSEMBLE_PATH):
-        st.success("✅ 다운로드 준비 완료! 아래 버튼을 눌러 파일을 다운로드하세요.")
+    # 만약 세션에 데이터가 없지만 폴더에 파일이 존재한다면 읽어오기
+    if st.session_state["model_bytes"] is None and os.path.exists(ENSEMBLE_PATH):
         with open(ENSEMBLE_PATH, "rb") as f:
-            st.download_button(
-                label="📥 앙상블 모델 패키지 다운로드 (.pkl)",
-                data=f,
-                file_name="ensemble_traffic_model.pkl",
-                mime="application/octet-stream",
-                key="force_visible_download_btn"
-            )
-    else:
-        st.warning("⚠️ 현재 폴더에 모델 파일이 없습니다. 위쪽의 **[학습 및 생성하기]** 버튼을 먼저 누르시면 다운로드 버튼이 활성화됩니다!")
-        # 화면 자리를 차지하고 항상 보여야 하므로 빈 데이터로 비활성화 버튼 배치
+            st.session_state["model_bytes"] = f.read()
+
+    # 메모리에 다운로드할 데이터가 준비되어 있다면 즉시 다운로드 버튼 활성화
+    if st.session_state["model_bytes"] is not None:
+        st.success("✅ 다운로드 준비가 완료되었습니다! 아래 버튼을 눌러주세요.")
         st.download_button(
-            label="📥 앙상블 모델 패키지 다운로드 (.pkl) (파일 생성 후 활성화)",
+            label="📥 앙상블 모델 패키지 다운로드 (.pkl) (즉시 다운로드)",
+            data=st.session_state["model_bytes"],
+            file_name="ensemble_traffic_model.pkl",
+            mime="application/octet-stream",
+            key="memory_download_btn"
+        )
+    else:
+        st.warning("⚠️ 아직 학습된 모델 데이터가 없습니다. 위쪽의 **[학습 및 생성하기]** 버튼을 눌러주세요.")
+        st.download_button(
+            label="📥 앙상블 모델 패키지 다운로드 (.pkl) (비활성화)",
             data=b"",
             file_name="ensemble_traffic_model.pkl",
             mime="application/octet-stream",
             disabled=True,
-            key="disabled_force_btn"
+            key="disabled_memory_btn"
         )
 
     st.divider()
 
-    # 3. 모델이 실제로 존재할 때만 검증 및 차트 렌더링 수행
-    if os.path.exists(ENSEMBLE_PATH):
+    # 3. 모델 로드 및 검증 수행
+    ensemble_model_pkg = None
+    if st.session_state["model_bytes"] is not None:
+        try:
+            import io
+            ensemble_model_pkg = joblib.load(io.BytesIO(st.session_state["model_bytes"]))
+        except Exception as e:
+            st.error(f"❌ 메모리에서 모델을 불러오는 중 오류가 발생했습니다: {e}")
+    elif os.path.exists(ENSEMBLE_PATH):
         try:
             ensemble_model_pkg = joblib.load(ENSEMBLE_PATH)
         except Exception as e:
-            ensemble_model_pkg = None
-            st.error(f"❌ 앙상블 모델 파일을 불러오는 중 오류가 발생했습니다: {e}")
+            st.error(f"❌ 파일에서 모델을 불러오는 중 오류가 발생했습니다: {e}")
 
-        if ensemble_model_pkg is not None:
-            if isinstance(ensemble_model_pkg, dict):
-                rf_model = ensemble_model_pkg.get("rf_model")
-                xgb_model = ensemble_model_pkg.get("xgb_model")
-            else:
-                rf_model = ensemble_model_pkg
-                xgb_model = None
+    if ensemble_model_pkg is not None:
+        if isinstance(ensemble_model_pkg, dict):
+            rf_model = ensemble_model_pkg.get("rf_model")
+            xgb_model = ensemble_model_pkg.get("xgb_model")
+        else:
+            rf_model = ensemble_model_pkg
+            xgb_model = None
 
-            # 예측 및 검증 로직 실행
-            if exists and past_time_data:
-                val_rows = []
-                for t_idx in sorted(past_time_data.keys()):
-                    total_p = sum({k: v for k, v in past_time_data[t_idx]['counts'].items() if k not in ["GH", "IM1", "IM2", "Outside"]}.values())
-                    total_sec = int(t_idx) * 10
-                    h, m = total_sec // 3600, (total_sec % 3600) // 60
-                    time_str = f"{target_date_str} {int(h):02d}:{int(m):02d}:00"
-                    parsed_time = pd.to_datetime(time_str, format="%Y-%m-%d %H:%M:%S", errors="coerce")
-                    
-                    val_rows.append({
-                        "시간": parsed_time,
-                        "hour": h,
-                        "minute": m,
-                        "dayofweek": selected_date.weekday(),
-                        "실제 측정치 (Ground Truth)": total_p
-                    })
-                df_val = pd.DataFrame(val_rows)
-                df_val = df_val.dropna(subset=["시간"])
-            else:
-                time_idx_val = pd.date_range(f"{target_date_str} 06:00:00", f"{target_date_str} 22:00:00", freq="30min")
-                df_val = pd.DataFrame({
-                    "시간": time_idx_val,
-                    "hour": time_idx_val.hour,
-                    "minute": time_idx_val.minute,
+        # 예측 및 검증 로직 실행
+        if exists and past_time_data:
+            val_rows = []
+            for t_idx in sorted(past_time_data.keys()):
+                total_p = sum({k: v for k, v in past_time_data[t_idx]['counts'].items() if k not in ["GH", "IM1", "IM2", "Outside"]}.values())
+                total_sec = int(t_idx) * 10
+                h, m = total_sec // 3600, (total_sec % 3600) // 60
+                time_str = f"{target_date_str} {int(h):02d}:{int(m):02d}:00"
+                parsed_time = pd.to_datetime(time_str, format="%Y-%m-%d %H:%M:%S", errors="coerce")
+                
+                val_rows.append({
+                    "시간": parsed_time,
+                    "hour": h,
+                    "minute": m,
                     "dayofweek": selected_date.weekday(),
-                    "실제 측정치 (Ground Truth)": 300 + np.random.normal(0, 30, len(time_idx_val))
+                    "실제 측정치 (Ground Truth)": total_p
                 })
+            df_val = pd.DataFrame(val_rows)
+            df_val = df_val.dropna(subset=["시간"])
+        else:
+            time_idx_val = pd.date_range(f"{target_date_str} 06:00:00", f"{target_date_str} 22:00:00", freq="30min")
+            df_val = pd.DataFrame({
+                "시간": time_idx_val,
+                "hour": time_idx_val.hour,
+                "minute": time_idx_val.minute,
+                "dayofweek": selected_date.weekday(),
+                "실제 측정치 (Ground Truth)": 300 + np.random.normal(0, 30, len(time_idx_val))
+            })
 
-            # 앙상블 예측 수행
-            X_target = df_val[['hour', 'minute', 'dayofweek']]
-            pred_rf = rf_model.predict(X_target) if rf_model else 0
-            if xgb_model is not None:
-                pred_xgb = xgb_model.predict(X_target)
-                predicted_vals = (0.5 * pred_rf) + (0.5 * pred_xgb)
-            else:
-                predicted_vals = pred_rf
+        # 앙상블 예측 수행
+        X_target = df_val[['hour', 'minute', 'dayofweek']]
+        pred_rf = rf_model.predict(X_target) if rf_model else 0
+        if xgb_model is not None:
+            pred_xgb = xgb_model.predict(X_target)
+            predicted_vals = (0.5 * pred_rf) + (0.5 * pred_xgb)
+        else:
+            predicted_vals = pred_rf
 
-            df_val['앙상블 예측치 (RF+XGB)'] = predicted_vals
-            df_val['잔차 (Residual)'] = df_val['실제 측정치 (Ground Truth)'] - df_val['앙상블 예측치 (RF+XGB)']
+        df_val['앙상블 예측치 (RF+XGB)'] = predicted_vals
+        df_val['잔차 (Residual)'] = df_val['실제 측정치 (Ground Truth)'] - df_val['앙상블 예측치 (RF+XGB)']
 
-            residuals = df_val['잔차 (Residual)']
-            actuals = df_val['실제 측정치 (Ground Truth)']
-            calc_mae = np.mean(np.abs(residuals))
-            calc_rmse = np.sqrt(np.mean(residuals ** 2))
-            mape = np.mean(np.abs(residuals / np.where(actuals == 0, 1, actuals))) * 100
-            max_error = np.max(np.abs(residuals))
-            std_error = np.std(residuals)
+        residuals = df_val['잔차 (Residual)']
+        actuals = df_val['실제 측정치 (Ground Truth)']
+        calc_mae = np.mean(np.abs(residuals))
+        calc_rmse = np.sqrt(np.mean(residuals ** 2))
+        mape = np.mean(np.abs(residuals / np.where(actuals == 0, 1, actuals))) * 100
+        max_error = np.max(np.abs(residuals))
+        std_error = np.std(residuals)
 
-            v1, v2, v3, v4, v5 = st.columns(5)
-            v1.metric("MAE (평균절대오차)", f"{calc_mae:.2f} 명")
-            v2.metric("RMSE (제곱근평균오차)", f"{calc_rmse:.2f} 명")
-            v3.metric("MAPE (평균절대백분율오차)", f"{mape:.2f}%")
-            v4.metric("Max Error (최대오차)", f"{max_error:.2f} 명")
-            v5.metric("Model Stability", f"±{std_error:.2f} 명")
-            
-            st.divider()
+        v1, v2, v3, v4, v5 = st.columns(5)
+        v1.metric("MAE (평균절대오차)", f"{calc_mae:.2f} 명")
+        v2.metric("RMSE (제곱근평균오차)", f"{calc_rmse:.2f} 명")
+        v3.metric("MAPE (평균절대백분율오차)", f"{mape:.2f}%")
+        v4.metric("Max Error (최대오차)", f"{max_error:.2f} 명")
+        v5.metric("Model Stability", f"±{std_error:.2f} 명")
+        
+        st.divider()
 
-            st.subheader(f"📈 [{target_date_str}] 실제 측정값 vs 앙상블 예측치 비교 검증")
-            df_melted = df_val.melt("시간", value_vars=["실제 측정치 (Ground Truth)", "앙상블 예측치 (RF+XGB)"], var_name="구분", value_name="인원")
-            val_chart = alt.Chart(df_melted).mark_line(point=True, strokeWidth=2.5).encode(
-                x=alt.X('시간:T', title='타임라인', axis=alt.Axis(labelColor='#94a3b8', titleColor='#f8fafc')),
-                y=alt.Y('인원:Q', title='체류 인원 (명)', axis=alt.Axis(labelColor='#94a3b8', titleColor='#f8fafc')),
-                color=alt.Color('구분:N', scale=alt.Scale(range=['#10b981', '#38bdf8']))
-            ).properties(height=380).configure(
-                background='#07090e',
-                view=alt.ViewConfig(stroke=None)
-            )
-            st.altair_chart(val_chart, use_container_width=True)
+        st.subheader(f"📈 [{target_date_str}] 실제 측정값 vs 앙상블 예측치 비교 검증")
+        df_melted = df_val.melt("시간", value_vars=["실제 측정치 (Ground Truth)", "앙상블 예측치 (RF+XGB)"], var_name="구분", value_name="인원")
+        val_chart = alt.Chart(df_melted).mark_line(point=True, strokeWidth=2.5).encode(
+            x=alt.X('시간:T', title='타임라인', axis=alt.Axis(labelColor='#94a3b8', titleColor='#f8fafc')),
+            y=alt.Y('인원:Q', title='체류 인원 (명)', axis=alt.Axis(labelColor='#94a3b8', titleColor='#f8fafc')),
+            color=alt.Color('구분:N', scale=alt.Scale(range=['#10b981', '#38bdf8']))
+        ).properties(height=380).configure(
+            background='#07090e',
+            view=alt.ViewConfig(stroke=None)
+        )
+        st.altair_chart(val_chart, use_container_width=True)
 # ==========================================
 # 4. 📡 실시간 센서 파이프라인 (Live)
 # ==========================================
