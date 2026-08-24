@@ -944,7 +944,7 @@ elif menu == "📡 실시간 센서 파이프라인 (Live)":
             st.markdown("##### 📍 실시간 공간 밀집도 스트림 뷰")
             live_heatmap = generate_density_heatmap(area_df, live_filtered, bg_img.shape)
             live_blended = cv2.addWeighted(bg_img, 0.55, live_heatmap, 0.45, 0)
-            st.image(cv2.cvtColor(live_blended, cv2.COLOR_BGR2RGB), use_container_width=True)
+            st.image(cv2.cvtColor(blended, cv2.COLOR_BGR2RGB), use_column_width=True)
             
         with lc2:
             st.markdown("##### 📊 실시간 구역별 여객 분포 Top 5")
