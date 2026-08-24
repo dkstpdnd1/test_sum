@@ -443,14 +443,14 @@ def train_and_save_models():
 
     progress_bar.progress(0.75)
     status_text.text("🤖 Random Forest 모델 학습 중...")
-    rf_model = RandomForestRegressor(n_estimators=50, random_state=42)
+    rf_model = RandomForestRegressor(n_estimators=5, random_state=42)
     rf_model.fit(X, y)
     joblib.dump(rf_model, RF_MODEL_PATH)
 
     if HAS_XGB:
         progress_bar.progress(0.90)
         status_text.text("🚀 XGBoost 모델 학습 중...")
-        xgb_model = XGBRegressor(n_estimators=50, learning_rate=0.1, max_depth=3, random_state=42)
+        xgb_model = XGBRegressor(n_estimators=5, learning_rate=0.1, max_depth=3, random_state=42)
         xgb_model.fit(X, y)
         joblib.dump(xgb_model, XGB_MODEL_PATH)
 
