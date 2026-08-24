@@ -393,13 +393,25 @@ def load_precomputed_models():
     return rf, xgb
 
 def train_and_save_models():
-    """앱 화면에서 버튼을 눌렀을 때 9~10월 데이터를 직접 읽어 모델을 학습하고 저장하는 함수"""
+    """앱 화면에서 버튼을 눌렀을 때 9~10월 데이터를 직접 읽어 모델을 학습하고 저장하는 함수 (진행바 표시 추가)"""
     all_files = glob.glob("area_count_time_full_*.csv")
     if not all_files:
         return False, "학습할 CSV 파일(`area_count_time_full_*.csv`)을 찾지 못했습니다."
 
+    # Streamlit 진행 상태바와 텍스트 영역 생성
+    progress_bar = st.progress(0)
+    status_text = st.empty()
+    
+    total_files = len(all_files)
     collected_rows = []
-    for fpath in all_files:
+    
+    # 1단계: CSV 파일 읽기 및 데이터 수집 (전체 진행도의 70% 할당)
+    for i, fpath in enumerate(all_files):
+        # 진행률 계산 (0% ~ 70%)
+        progress_percent = int(((i + 1) / total_files) * 70)
+        progress_bar.progress(progress_percent / 100)
+        status_text.text(f"📁 파일 파싱 중... ({i + 1}/{total_files}) - {os.path.basename(fpath)}")
+        
         try:
             df_part = pd.read_csv(fpath)
             if not {'time_index', 'area', 'num_people'}.issubset(df_part.columns):
@@ -426,20 +438,33 @@ def train_and_save_models():
 
     df_train = pd.DataFrame(collected_rows)
     if df_train.empty:
+        progress_bar.empty()
+        status_text.empty()
         return False, "유효한 학습 데이터가 추출되지 않았습니다."
 
     X = df_train[['hour', 'minute', 'dayofweek']]
     y = df_train['target']
 
+    # 2단계: Random Forest 모델 학습 (70% ~ 85%)
+    progress_bar.progress(0.75)
+    status_text.text("🤖 Random Forest 모델 학습 중...")
     rf_model = RandomForestRegressor(n_estimators=50, random_state=42)
     rf_model.fit(X, y)
     joblib.dump(rf_model, RF_MODEL_PATH)
 
+    # 3단계: XGBoost 모델 학습 (85% ~ 100%)
     if HAS_XGB:
+        progress_bar.progress(0.90)
+        status_text.text("🚀 XGBoost 모델 학습 중...")
         xgb_model = XGBRegressor(n_estimators=50, learning_rate=0.1, max_depth=3, random_state=42)
         xgb_model.fit(X, y)
         joblib.dump(xgb_model, XGB_MODEL_PATH)
 
+    # 완료 처리
+    progress_bar.progress(1.0)
+    status_text.text("✨ 학습 및 저장 완료!")
+    
+    # 잠시 후 진행바와 텍스트를 깔끔하게 지우기 위해 유지 (선택사항)
     st.cache_resource.clear()
     return True, f"총 {len(df_train):,}개 샘플로 모델 학습 및 저장 완료!"
 
