@@ -800,8 +800,6 @@ elif menu == "🔍 모델 예측 및 검증 (Validation)":
 
     # 1. 앙상블 통합 모델 파일 경로 설정 (pages 폴더 내부 기준)
     ENSEMBLE_PATH = "pages/ensemble_traffic_model.pkl"
-    
-    # 만약 루트 폴더나 pages 폴더 중 어디에 있든 유연하게 찾도록 설정할 수도 있습니다.
     if not os.path.exists(ENSEMBLE_PATH) and os.path.exists("ensemble_traffic_model.pkl"):
         ENSEMBLE_PATH = "ensemble_traffic_model.pkl"
 
@@ -814,47 +812,53 @@ elif menu == "🔍 모델 예측 및 검증 (Validation)":
 
     st.markdown("### ⚙️ AI 앙상블 모델 학습 제어 패널")
     
-    # 학습 버튼 (사용자가 직접 누를 때만 동작)
+    # 세션 스테이트를 이용해 학습 성공 여부 상태 관리 (rerun 없이도 화면 유지)
+    if "train_success" not in st.session_state:
+        st.session_state.train_success = False
+
+    # 학습 버튼 (st.rerun()을 제거하여 다운로드 버튼이 사라지지 않게 함)
     if st.button("🔄 9~10월 데이터로 앙상블 모델(RF + XGB) 학습 및 생성하기"):
         with st.spinner("Random Forest와 XGBoost를 모두 학습하고 앙상블 패키지를 생성 중입니다..."):
-            success, msg = train_and_save_models() # 내부적으로 학습 후 앙상블 파일 저장 처리
+            success, msg = train_and_save_models()
             if success:
-                st.success(f"🎉 {msg}")
-                st.rerun()
+                st.session_state.train_success = True
+                st.success(f"🎉 {msg} (아래에서 다운로드 버튼을 확인하세요!)")
             else:
+                st.session_state.train_success = False
                 st.error(f"❌ 학습 실패: {msg}")
 
-    # 2. 앙상블 파일 로드 (직접 불러오기 시도)
+    # 2. 앙상블 파일 로드 시도 (파일이 존재하거나 방금 학습에 성공한 경우)
     ensemble_model_pkg = None
-    if ensemble_exists:
-        try:
-            ensemble_model_pkg = joblib.load(ENSEMBLE_PATH)
-        except Exception as e:
-            st.error(f"❌ 앙상블 모델 파일을 불러오는 중 오류가 발생했습니다: {e}")
+    if ensemble_exists or st.session_state.train_success:
+        if os.path.exists(ENSEMBLE_PATH):
+            try:
+                ensemble_model_pkg = joblib.load(ENSEMBLE_PATH)
+            except Exception as e:
+                st.error(f"❌ 앙상블 모델 파일을 불러오는 중 오류가 발생했습니다: {e}")
 
-    # 3. 모델이 성공적으로 로드된 경우 (다운로드 버튼 및 예측 검증 진행)
+    # 3. 모델이 준비된 경우 다운로드 버튼 및 검증 대시보드 출력
     if ensemble_model_pkg is not None:
         st.markdown("---")
         st.markdown("##### 📥 앙상블 모델 패키지 다운로드")
         
-        # 파일 바이너리를 읽어 다운로드 버튼 제공
-        with open(ENSEMBLE_PATH, "rb") as f:
-            st.download_button(
-                label="📥 앙상블 모델 패키지 다운로드 (.pkl) (통합)",
-                data=f,
-                file_name="ensemble_traffic_model.pkl",
-                mime="application/octet-stream"
-            )
-        st.info("💡 다운로드하신 `ensemble_traffic_model.pkl` 파일을 깃허브 `pages/` 폴더에 업로드해 두시면, 다음부터는 학습 버튼을 누르지 않아도 자동으로 앙상블 예측을 수행합니다!")
+        # 파일이 확실히 존재할 때만 다운로드 버튼 렌더링 (사라지지 않음)
+        if os.path.exists(ENSEMBLE_PATH):
+            with open(ENSEMBLE_PATH, "rb") as f:
+                st.download_button(
+                    label="📥 앙상블 모델 패키지 다운로드 (.pkl) (통합)",
+                    data=f,
+                    file_name="ensemble_traffic_model.pkl",
+                    mime="application/octet-stream"
+                )
+            st.info("💡 다운로드하신 `ensemble_traffic_model.pkl` 파일을 깃허브 `pages/` 폴더에 업로드해 두시면, 다음부터는 학습 버튼을 누르지 않아도 자동으로 앙상블 예측을 수행합니다!")
 
         st.divider()
 
-        # 앙상블 모델 구조 추출 (딕셔너리 형태이거나 개별 모델인 경우 모두 대응)
+        # 앙상블 모델 구조 추출
         if isinstance(ensemble_model_pkg, dict):
             rf_model = ensemble_model_pkg.get("rf_model")
             xgb_model = ensemble_model_pkg.get("xgb_model")
         else:
-            # 혹시 모델 객체 자체가 저장된 경우의 방어 코드
             rf_model = ensemble_model_pkg
             xgb_model = None
 
@@ -887,15 +891,14 @@ elif menu == "🔍 모델 예측 및 검증 (Validation)":
                 "실제 측정치 (Ground Truth)": 300 + np.random.normal(0, 30, len(time_idx_val))
             })
 
-        # 앙상블 예측 수행 (RF + XGB 결합)
+        # 앙상블 예측 수행
         X_target = df_val[['hour', 'minute', 'dayofweek']]
-        
         pred_rf = rf_model.predict(X_target) if rf_model else 0
         if xgb_model is not None:
             pred_xgb = xgb_model.predict(X_target)
             predicted_vals = (0.5 * pred_rf) + (0.5 * pred_xgb)
         else:
-            predicted_vals = pred_rf # XGB가 없을 경우 RF 단독 적용 방어
+            predicted_vals = pred_rf
 
         df_val['앙상블 예측치 (RF+XGB)'] = predicted_vals
         df_val['잔차 (Residual)'] = df_val['실제 측정치 (Ground Truth)'] - df_val['앙상블 예측치 (RF+XGB)']
@@ -929,7 +932,6 @@ elif menu == "🔍 모델 예측 및 검증 (Validation)":
         )
         st.altair_chart(val_chart, use_container_width=True)
     else:
-        # 모델이 없을 때 깔끔하게 경고창만 띄우고 불필요한 에러 방지
         st.info("👆 위쪽의 **[앙상블 모델 학습 및 생성하기]** 버튼을 눌러 새로운 앙상블 모델을 빌드해 주세요.")
 # ==========================================
 # 4. 📡 실시간 센서 파이프라인 (Live)
