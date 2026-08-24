@@ -1,4 +1,4 @@
-import datetime
+[source: 8]import datetime
 import os
 import glob
 import cv2
@@ -17,11 +17,27 @@ except ImportError:
     HAS_XGB = False
 
 
+# --- [커스텀 앙상블 모델 클래스 정의] ---
+class WeightedEnsembleRegressor:
+    """Random Forest와 XGBoost에 각각 0.5 가중치를 부여하여 예측하는 앙상블 모델"""
+    def __init__(self, rf_model, xgb_model, rf_weight=0.5, xgb_weight=0.5):
+        self.rf_model = rf_model
+        self.xgb_model = xgb_model
+        self.rf_weight = rf_weight
+        self.xgb_weight = xgb_weight
+
+    def predict(self, X):
+        pred_rf = self.rf_model.predict(X) if self.rf_model is not None else np.zeros(len(X))
+        pred_xgb = self.xgb_model.predict(X) if self.xgb_model is not None else np.zeros(len(X))
+        return (self.rf_weight * pred_rf) + (self.xgb_weight * pred_xgb)
+
+
 # --- [시스템 설정] ---
 AREA_FILE_PATH = "terminal_areas_grouped_2.csv"         
 BACKGROUND_IMAGE_PATH = "ICN_Airport_3F.png"         
 RF_MODEL_PATH = "rf_model.pkl"                       
 XGB_MODEL_PATH = "xgb_model.pkl"                     
+ENSEMBLE_MODEL_PATH = "ensemble_model.pkl"           # 통합 앙상블 모델 저장 경로
 
 
 # --- [디자인 시스템: 극도로 전문적인 하이엔드 관제 스타일 CSS 적용] ---
@@ -372,9 +388,8 @@ def load_data_by_date(selected_date_str):
 # --- [AI 모델 로드 및 학습 함수] ---
 @st.cache_resource
 def load_precomputed_models():
-    rf = joblib.load(RF_MODEL_PATH) if os.path.exists(RF_MODEL_PATH) else None
-    xgb = joblib.load(XGB_MODEL_PATH) if os.path.exists(XGB_MODEL_PATH) else None
-    return rf, xgb
+    ensemble_model = joblib.load(ENSEMBLE_MODEL_PATH) if os.path.exists(ENSEMBLE_MODEL_PATH) else None
+    return ensemble_model
 
 def train_and_save_models():
     all_files = glob.glob("area_count_time_full_*.csv")
@@ -429,21 +444,26 @@ def train_and_save_models():
     status_text.text("🤖 Random Forest 모델 학습 중...")
     rf_model = RandomForestRegressor(n_estimators=50, random_state=42)
     rf_model.fit(X, y)
-    joblib.dump(rf_model, RF_MODEL_PATH)
 
+    xgb_model = None
     if HAS_XGB:
         progress_bar.progress(0.90)
         status_text.text("🚀 XGBoost 모델 학습 중...")
         xgb_model = XGBRegressor(n_estimators=50, learning_rate=0.1, max_depth=3, random_state=42)
         xgb_model.fit(X, y)
-        joblib.dump(xgb_model, XGB_MODEL_PATH)
+
+    # 0.5 가중치를 부여하는 통합 앙상블 모델 객체 생성 및 저장
+    progress_bar.progress(0.95)
+    status_text.text("⚖️ 0.5 가중치 앙상블 모델 결합 및 저장 중...")
+    ensemble_model = WeightedEnsembleRegressor(rf_model=rf_model, xgb_model=xgb_model, rf_weight=0.5, xgb_weight=0.5)
+    joblib.dump(ensemble_model, ENSEMBLE_MODEL_PATH)
 
     progress_bar.progress(1.0)
-    status_text.text("✨ 학습 및 저장 완료!")
+    status_text.text("✨ 앙상블 모델 학습 및 저장 완료!")
     
     # 캐시 비우기 (새로 학습된 모델 반영)
     st.cache_resource.clear()
-    return True, f"총 {len(df_train):,}개 샘플로 모델 학습 및 저장 완료!"
+    return True, f"총 {len(df_train):,}개 샘플로 앙상블 모델(RF+XGB 각 0.5 가중치) 학습 및 저장 완료!"
 
 def get_daily_peaks(df_trend):
     peaks = {}
@@ -696,49 +716,37 @@ elif menu == "🗺️ 터미널 구역별 상세 분석":
 # 3. 🔍 모델 예측 및 검증 (Validation)
 # ==========================================
 elif menu == "🔍 모델 예측 및 검증 (Validation)":
-    st.title("🔍 인공지능 기반 여객 수요 예측 앙상블 모델 검증")
-    st.markdown(f"> **[모델 관리 및 검증 모드]** 버튼을 눌러 데이터를 직접 학습시키거나, 저장된 AI 모델(`{RF_MODEL_PATH}`)로 현재 선택하신 **{target_date_str}**의 실제 측정값을 정밀 비교할 수 있습니다.")
+    st.title("🔍 인공지능 기반 여객 수요 앙상블 모델 검증")
+    st.markdown(f"> **[모델 관리 및 검증 모드]** 버튼을 눌러 데이터를 직접 학습시키거나, 저장된 앙상블 AI 모델(`{ENSEMBLE_MODEL_PATH}`)로 현재 선택하신 **{target_date_str}**의 실제 측정값을 정밀 비교할 수 있습니다.")
 
-    st.markdown("### ⚙️ AI 모델 학습 제어 패널")
-    if st.button("🔄 데이터로 AI 모델 학습 및 저장하기 (Train Model)"):
-        with st.spinner("AI 모델을 학습 중입니다. 잠시만 기다려주세요..."):
+    st.markdown("### ⚙️ AI 앙상블 모델 학습 제어 패널")
+    if st.button("🔄 앙상블 모델(RF+XGB 각 0.5 가중치) 학습 및 저장하기"):
+        with st.spinner("앙상블 모델을 학습 중입니다. 잠시만 기다려주세요..."):
             success, msg = train_and_save_models()
             if success:
                 st.success(f"🎉 {msg}")
             else:
                 st.error(f"❌ 학습 실패: {msg}")
 
-    # --- 📥 [학습된 모델 파일 다운로드 버튼 (가중치 앙상블 포함)] ---
-    if os.path.exists(RF_MODEL_PATH) or os.path.exists(XGB_MODEL_PATH):
+    # --- 📥 [통합 앙상블 모델 파일 다운로드 버튼] ---
+    if os.path.exists(ENSEMBLE_MODEL_PATH):
         st.markdown("---")
-        st.markdown("##### 📥 학습된 모델 파일 다운로드")
-        col_down1, col_down2 = st.columns(2)
-        
-        if os.path.exists(RF_MODEL_PATH):
-            with open(RF_MODEL_PATH, "rb") as f:
-                col_down1.download_button(
-                    label="📥 Random Forest 모델 다운로드 (.pkl)",
-                    data=f,
-                    file_name="rf_model.pkl",
-                    mime="application/octet-stream"
-                )
-                
-        if os.path.exists(XGB_MODEL_PATH):
-            with open(XGB_MODEL_PATH, "rb") as f:
-                col_down2.download_button(
-                    label="📥 XGBoost 모델 다운로드 (.pkl)",
-                    data=f,
-                    file_name="xgb_model.pkl",
-                    mime="application/octet-stream"
-                )
-        st.info("💡 위 버튼을 통해 학습된 `.pkl` 모델 파일을 다운로드하실 수 있습니다.")
+        st.markdown("##### 📥 통합 앙상블 모델 파일 다운로드")
+        with open(ENSEMBLE_MODEL_PATH, "rb") as f:
+            st.download_button(
+                label="📥 앙상블 모델 다운로드 (.pkl)",
+                data=f,
+                file_name="ensemble_model.pkl",
+                mime="application/octet-stream"
+            )
+        st.info("💡 위 버튼을 통해 두 모델이 0.5 가중치로 결합된 단일 `.pkl` 앙상블 모델 파일을 다운로드하실 수 있습니다.")
 
     st.divider()
 
-    rf_model, xgb_model = load_precomputed_models()
+    ensemble_model = load_precomputed_models()
 
-    if rf_model is None and xgb_model is None:
-        st.warning(f"⚠️ 저장된 모델 파일이 없습니다. 위쪽의 **[학습 및 저장하기]** 버튼을 먼저 눌러주세요!")
+    if ensemble_model is None:
+        st.warning(f"⚠️ 저장된 앙상블 모델 파일이 없습니다. 위쪽의 **[학습 및 저장하기]** 버튼을 먼저 눌러주세요!")
     else:
         if exists and past_time_data:
             val_rows = []
@@ -768,14 +776,9 @@ elif menu == "🔍 모델 예측 및 검증 (Validation)":
                 "실제 측정치 (Ground Truth)": 300 + np.random.normal(0, 30, len(time_idx_val))
             })
 
-        # 앙상블 예측 수행 (RF 0.5, XGB 0.5 가중치 부여)
+        # 앙상블 모델을 통한 예측 수행 (RF 0.5 + XGB 0.5 자동 적용)
         X_target = df_val[['hour', 'minute', 'dayofweek']]
-        
-        pred_rf = rf_model.predict(X_target) if rf_model is not None else np.zeros(len(df_val))
-        pred_xgb = xgb_model.predict(X_target) if xgb_model is not None else np.zeros(len(df_val))
-        
-        # 각각 0.5씩 가중치를 부과하여 앙상블 산출
-        predicted_vals = (0.5 * pred_rf) + (0.5 * pred_xgb)
+        predicted_vals = ensemble_model.predict(X_target)
 
         df_val['앙상블 예측치 (RF+XGB)'] = predicted_vals
         df_val['잔차 (Residual)'] = df_val['실제 측정치 (Ground Truth)'] - df_val['앙상블 예측치 (RF+XGB)']
