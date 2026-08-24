@@ -1,13 +1,13 @@
 import datetime
-import glob
 import os
+import glob
 import cv2
+import joblib
 import numpy as np
 import pandas as pd
 import streamlit as st
 import altair as alt
 
-# 머신러닝 및 앙상블 모델 라이브러리 임포트
 from sklearn.ensemble import RandomForestRegressor
 try:
     from xgboost import XGBRegressor
@@ -19,25 +19,32 @@ except ImportError:
 # --- [시스템 설정] ---
 AREA_FILE_PATH = "terminal_areas_grouped_2.csv"         
 BACKGROUND_IMAGE_PATH = "ICN_Airport_3F.png"         
+RF_MODEL_PATH = "rf_model.pkl"                       
+XGB_MODEL_PATH = "xgb_model.pkl"                     
 
 
-# --- [디자인 시스템: 극도로 전문적인 하이엔드 관제 스타일 CSS 적용] ---
+# --- [디자인 시스템 CSS 적용] ---
 st.markdown("""
     <style>
-        .stApp { background-color: #07090e; color: #f1f5f9; font-family: 'Inter', sans-serif; }
+        .stApp { background-color: #07090e; color: #f1f5f9; font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; }
         [data-testid="stSidebar"] { background-color: #0b0f19; border-right: 1px solid #1e293b; }
         [data-testid="stSidebar"] * { color: #f8fafc !important; }
+        [data-testid="stSidebar"] input { background-color: #111827 !important; color: #f8fafc !important; border: 1px solid #334155 !important; }
         [data-testid="stMetric"] { 
             background: linear-gradient(135deg, #111827 0%, #0b0f19 100%) !important;
             padding: 16px 20px !important; border-radius: 10px !important; 
-            border: 1px solid #1e293b !important; height: 100px;
-            display: flex; flex-direction: column; justify-content: center;
+            border: 1px solid #1e293b !important; box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.3);
+            height: 100px; display: flex; flex-direction: column; justify-content: center;
         }
         [data-testid="stMetric"] label { color: #94a3b8 !important; font-weight: 600 !important; font-size: 0.78rem !important; }
         [data-testid="stMetric"] [data-testid="stMetricValue"] { color: #f8fafc !important; font-weight: 700 !important; font-size: 1.35rem !important; }
-        h1, h2, h3 { color: #f8fafc !important; font-weight: 700 !important; }
-        .stButton button { background-color: #2563eb; color: white; font-weight: 600; border-radius: 8px; border: none; }
-        .stButton button:hover { background-color: #1d4ed8; }
+        h1, h2, h3 { color: #f8fafc !important; font-family: 'Inter', sans-serif; font-weight: 700 !important; }
+        .ioc-table { width: 100%; border-collapse: collapse; background-color: #0b0f19; color: #f8fafc; border: 1px solid #1e293b; border-radius: 8px; overflow: hidden; font-size: 0.9rem; margin-top: 10px; margin-bottom: 20px; }
+        .ioc-table th { background-color: #111827; color: #94a3b8; font-weight: 600; text-align: left; padding: 12px 16px; border-bottom: 1px solid #1e293b; }
+        .ioc-table td { padding: 12px 16px; border-bottom: 1px solid #111827; color: #f8fafc; }
+        .ioc-table tr:hover { background-color: #111827; }
+        .stButton button { background-color: #2563eb; color: white; font-weight: 600; border-radius: 8px; border: none; transition: all 0.3s ease; }
+        .stButton button:hover { background-color: #1d4ed8; box-shadow: 0 0 12px rgba(37, 99, 235, 0.5); }
     </style>
 """, unsafe_allow_html=True)
 
@@ -60,8 +67,6 @@ def load_data_by_date(selected_date_str):
     
     counts_df = pd.read_csv(file_path)
     time_grouped_data = {}
-    
-    # 구조: data_date, time_index, area, num_people
     for t_index, group in counts_df.groupby('time_index'):
         filtered = group[group['area'] != 'Outside']
         time_grouped_data[t_index] = {'counts': dict(zip(filtered['area'], filtered['num_people']))}
@@ -69,34 +74,33 @@ def load_data_by_date(selected_date_str):
     return area_df, time_grouped_data, sorted(list(time_grouped_data.keys())), bg_img, True
 
 
-# --- [🔥 9월~10월 전체 파일 학습 함수 (캐싱 적용)] ---
+# --- [모델 로드 및 학습 함수] ---
 @st.cache_resource
-def train_ensemble_model_on_all_data():
-    """
-    area_count_time_full_*.csv 패턴을 가진 9~10월 모든 파일을 읽어와서 
-    time_index별 총 체류 인원을 계산하고 RF + XGBoost 모델을 학습시킵니다.
-    """
+def load_precomputed_models():
+    rf = joblib.load(RF_MODEL_PATH) if os.path.exists(RF_MODEL_PATH) else None
+    xgb = joblib.load(XGB_MODEL_PATH) if os.path.exists(XGB_MODEL_PATH) else None
+    return rf, xgb
+
+def train_and_save_models():
+    """앱 화면에서 버튼을 눌렀을 때 실행되는 학습 및 파일 저장 함수"""
     all_files = glob.glob("area_count_time_full_*.csv")
+    if not all_files:
+        return False, "학습할 CSV 파일(`area_count_time_full_*.csv`)을 찾지 못했습니다."
+
     collected_rows = []
-    
     for fpath in all_files:
         try:
             df_part = pd.read_csv(fpath)
-            # 필수 컬럼 검증
             if not {'time_index', 'area', 'num_people'}.issubset(df_part.columns):
                 continue
-                
-            # 파일명에서 날짜 추출 (area_count_time_full_YYYY-MM-DD.csv)
             date_str = fpath.replace("area_count_time_full_", "").replace(".csv", "")
             dt_base = pd.to_datetime(date_str, errors='coerce')
             if pd.isna(dt_base):
                 continue
                 
-            # 타임인덱스별로 외부(Outside)를 제외한 총 인원 집계
             for t_idx, group in df_part.groupby('time_index'):
                 filtered = group[group['area'] != 'Outside']
                 total_p = filtered['num_people'].sum()
-                
                 total_sec = int(t_idx) * 10
                 h, m = total_sec // 3600, (total_sec % 3600) // 60
                 
@@ -108,33 +112,28 @@ def train_ensemble_model_on_all_data():
                 })
         except Exception:
             continue
-            
+
     df_train = pd.DataFrame(collected_rows)
-    
-    # 데이터가 없을 경우 안전 장치
     if df_train.empty:
-        df_train = pd.DataFrame({
-            "hour": [8, 9, 10, 14, 18],
-            "minute": [0, 30, 0, 30, 0],
-            "dayofweek": [1, 2, 3, 4, 5],
-            "target": [300, 450, 400, 350, 500]
-        })
+        return False, "유효한 학습 데이터가 추출되지 않았습니다."
 
     X = df_train[['hour', 'minute', 'dayofweek']]
     y = df_train['target']
 
-    # 모델 학습 (Random Forest)
-    rf = RandomForestRegressor(n_estimators=50, random_state=42)
-    rf.fit(X, y)
-    
-    # 모델 학습 (XGBoost)
+    # Random Forest 학습
+    rf_model = RandomForestRegressor(n_estimators=50, random_state=42)
+    rf_model.fit(X, y)
+    joblib.dump(rf_model, RF_MODEL_PATH)
+
+    # XGBoost 학습 (가능한 경우)
     if HAS_XGB:
-        xgb = XGBRegressor(n_estimators=50, learning_rate=0.1, max_depth=3, random_state=42)
-        xgb.fit(X, y)
-    else:
-        xgb = None
-        
-    return rf, xgb
+        xgb_model = XGBRegressor(n_estimators=50, learning_rate=0.1, max_depth=3, random_state=42)
+        xgb_model.fit(X, y)
+        joblib.dump(xgb_model, XGB_MODEL_PATH)
+
+    # 캐시 클리어하여 새로 학습된 모델이 즉시 반영되도록 함
+    st.cache_resource.clear()
+    return True, f"총 {len(df_train):,}개 샘플로 모델 학습 및 저장 완료!"
 
 
 def generate_density_heatmap(area_df, current_counts, img_shape):
@@ -170,8 +169,7 @@ st.sidebar.markdown("---")
 
 if menu != "📡 실시간 센서 파이프라인 (Live)":
     st.sidebar.markdown("### 🛠️ 아카이브 제어 패널")
-    # 9월~10월 범위 안에서 선택 가능하도록 기본값 설정 (예: 2025-10-31)
-    selected_date = st.sidebar.date_input("📅 관제 대상일자 선택 (Playback)", value=datetime.date(2025, 10, 31))
+    selected_date = st.sidebar.date_input("📅 관제 대상일자 선택 (Playback)", value=datetime.date(2025, 10, 4))
     target_date_str = selected_date.strftime("%Y-%m-%d")
     area_df, past_time_data, past_unique_times, bg_img, exists = load_data_by_date(target_date_str)
 else:
@@ -197,7 +195,7 @@ if menu == "🚨 통합 관제 상황판 (Dashboard)":
         selected_t_index = st.select_slider("🕒 타임라인 시뮬레이터", options=time_options, format_func=lambda x: idx_to_label[x])
         
         current_counts = past_time_data[selected_t_index]['counts']
-        filtered_counts = {k: v for k, v in current_counts.items() if k not in ["GH", "IM1", "IM2", "Outside"]}
+        filtered_counts = {k: v for k, v in current_counts.items() if k not in ["GH", "IM1", "IM2"]}
         
         total_people = sum(filtered_counts.values())
         urgent_areas = {k: v for k, v in filtered_counts.items() if v >= 80}
@@ -230,7 +228,7 @@ elif menu == "🗺️ 터미널 구역별 상세 분석":
     if not exists:
         st.error("데이터가 없습니다.")
     else:
-        time_trend_data = [{"시간": index_to_time_str(t), "인원": sum({k: v for k, v in past_time_data[t]['counts'].items() if k not in ["GH", "IM1", "IM2", "Outside"]}.values())} for t in sorted(past_time_data.keys())]
+        time_trend_data = [{"시간": index_to_time_str(t), "인원": sum({k: v for k, v in past_time_data[t]['counts'].items() if k not in ["GH", "IM1", "IM2"]}.values())} for t in sorted(past_time_data.keys())]
         df_trend = pd.DataFrame(time_trend_data)
         df_trend['시간'] = pd.to_datetime(df_trend['시간'], format='%H:%M:%S', errors='coerce')
         df_trend = df_trend.dropna(subset=['시간']).set_index("시간").sort_index()
@@ -239,90 +237,103 @@ elif menu == "🗺️ 터미널 구역별 상세 분석":
         st.altair_chart(alt.Chart(df_trend.reset_index()).mark_area(color='#2563eb', opacity=0.7).encode(x='시간:T', y='이동평균:Q').properties(height=280), use_container_width=True)
 
 # ==========================================
-# 3. 🔍 모델 예측 및 검증 (Validation)
+# 3. 🔍 모델 예측 및 검증 (Validation - 학습 버튼 포함)
 # ==========================================
 elif menu == "🔍 모델 예측 및 검증 (Validation)":
     st.title("🔍 인공지능 여객 수요 예측 앙상블 모델 검증")
-    st.markdown(f"> **[9~10월 실제 학습 데이터 연동]** 9월 1일부터 10월 31일까지의 전체 CSV 데이터를 기반으로 학습된 AI 모델과, 현재 선택하신 **{target_date_str}**의 실제 측정값을 비교합니다.")
+    st.markdown(f"> **[모델 관리 및 검증 모드]** 버튼을 눌러 데이터를 직접 학습시키거나, 저장된 모델로 현재 **{target_date_str}**의 실제 측정값을 정밀 비교할 수 있습니다.")
 
-    # 1. 9~10월 전체 데이터 모델 학습/로드
-    rf_model, xgb_model = train_ensemble_model_on_all_data()
+    # 💡 [학습 버튼 영역]
+    st.markdown("### ⚙️ AI 모델 학습 제어 패널")
+    if st.button("🔄 9~10월 데이터로 AI 모델 학습 및 저장하기 (Train Model)"):
+        with st.spinner("AI 모델을 학습 중입니다. 잠시만 기다려주세요..."):
+            success, msg = train_and_save_models()
+            if success:
+                st.success(f"🎉 {msg}")
+            else:
+                st.error(f"❌ 학습 실패: {msg}")
 
-    # 2. 선택된 날짜의 실제 관측치 추출
-    if exists and past_time_data:
-        val_rows = []
-        for t_idx in sorted(past_time_data.keys()):
-            total_p = sum({k: v for k, v in past_time_data[t_idx]['counts'].items() if k not in ["GH", "IM1", "IM2", "Outside"]}.values())
-            total_sec = int(t_idx) * 10
-            h, m = total_sec // 3600, (total_sec % 3600) // 60
-            val_rows.append({
-                "시간": pd.to_datetime(f"{target_date_str} {h:02d}:{m:02d}:00"),
-                "hour": h,
-                "minute": m,
-                "dayofweek": selected_date.weekday(),
-                "실제 측정치 (Ground Truth)": total_p
-            })
-        df_val = pd.DataFrame(val_rows)
-    else:
-        time_idx_val = pd.date_range(f"{target_date_str} 06:00:00", f"{target_date_str} 22:00:00", freq="30min")
-        df_val = pd.DataFrame({
-            "시간": time_idx_val,
-            "hour": time_idx_val.hour,
-            "minute": time_idx_val.minute,
-            "dayofweek": selected_date.weekday(),
-            "실제 측정치 (Ground Truth)": 300 + np.random.normal(0, 30, len(time_idx_val))
-        })
-
-    # 3. 앙상블 예측 수행
-    X_target = df_val[['hour', 'minute', 'dayofweek']]
-    pred_rf = rf_model.predict(X_target)
-    if xgb_model is not None:
-        pred_xgb = xgb_model.predict(X_target)
-        predicted_vals = (0.5 * pred_rf) + (0.5 * pred_xgb)
-    else:
-        predicted_vals = pred_rf
-
-    df_val['앙상블 예측치 (RF+XGB)'] = predicted_vals
-    df_val['잔차 (Residual)'] = df_val['실제 측정치 (Ground Truth)'] - df_val['앙상블 예측치 (RF+XGB)']
-
-    # 4. 성능 지표 계산
-    residuals = df_val['잔차 (Residual)']
-    actuals = df_val['실제 측정치 (Ground Truth)']
-    calc_mae = np.mean(np.abs(residuals))
-    calc_rmse = np.sqrt(np.mean(residuals ** 2))
-    mape = np.mean(np.abs(residuals / np.where(actuals == 0, 1, actuals))) * 100
-    max_error = np.max(np.abs(residuals))
-    std_error = np.std(residuals)
-
-    # 지표 카드 출력
-    v1, v2, v3, v4, v5 = st.columns(5)
-    v1.metric("MAE (평균절대오차)", f"{calc_mae:.2f} 명")
-    v2.metric("RMSE (제곱근평균오차)", f"{calc_rmse:.2f} 명")
-    v3.metric("MAPE (평균절대백분율오차)", f"{mape:.2f}%")
-    v4.metric("Max Error (최대오차)", f"{max_error:.2f} 명")
-    v5.metric("Model Stability", f"±{std_error:.2f} 명")
-    
     st.divider()
 
-    # 비교 차트
-    st.subheader(f"📈 [{target_date_str}] 실제 측정값 vs AI 예측치 비교 검증")
-    df_melted = df_val.melt("시간", value_vars=["실제 측정치 (Ground Truth)", "앙상블 예측치 (RF+XGB)"], var_name="구분", value_name="인원")
-    val_chart = alt.Chart(df_melted).mark_line(point=True, strokeWidth=2.5).encode(
-        x=alt.X('시간:T', title='타임라인'),
-        y=alt.Y('인원:Q', title='체류 인원 (명)'),
-        color=alt.Color('구분:N', scale=alt.Scale(range=['#10b981', '#38bdf8']))
-    ).properties(height=320)
-    st.altair_chart(val_chart, use_container_width=True)
+    # 모델 불러오기
+    rf_model, xgb_model = load_precomputed_models()
 
-    col_sub1, col_sub2 = st.columns(2)
-    with col_sub1:
-        st.subheader("📉 잔차(Residuals) 분석")
-        res_chart = alt.Chart(df_val).mark_bar(color='#f43f5e').encode(x='시간:T', y='잔차 (Residual):Q').properties(height=260)
-        st.altair_chart(res_chart, use_container_width=True)
-    with col_sub2:
-        st.subheader("📊 오차 분포 밀도")
-        hist_chart = alt.Chart(df_val).mark_bar(color='#8b5cf6').encode(x=alt.X('잔차 (Residual):Q', bin=True), y='count():Q').properties(height=260)
-        st.altair_chart(hist_chart, use_container_width=True)
+    if rf_model is None:
+        st.warning(f"⚠️ 저장된 모델 파일(`{RF_MODEL_PATH}`)이 없습니다. 위쪽의 **[학습 및 저장하기]** 버튼을 먼저 눌러주세요!")
+    else:
+        # 1. 실제 관측치 추출
+        if exists and past_time_data:
+            val_rows = []
+            for t_idx in sorted(past_time_data.keys()):
+                total_p = sum({k: v for k, v in past_time_data[t_idx]['counts'].items() if k not in ["GH", "IM1", "IM2", "Outside"]}.values())
+                total_sec = int(t_idx) * 10
+                h, m = total_sec // 3600, (total_sec % 3600) // 60
+                val_rows.append({
+                    "시간": pd.to_datetime(f"{target_date_str} {h:02d}:{m:02d}:00"),
+                    "hour": h,
+                    "minute": m,
+                    "dayofweek": selected_date.weekday(),
+                    "실제 측정치 (Ground Truth)": total_p
+                })
+            df_val = pd.DataFrame(val_rows)
+        else:
+            time_idx_val = pd.date_range(f"{target_date_str} 06:00:00", f"{target_date_str} 22:00:00", freq="30min")
+            df_val = pd.DataFrame({
+                "시간": time_idx_val,
+                "hour": time_idx_val.hour,
+                "minute": time_idx_val.minute,
+                "dayofweek": selected_date.weekday(),
+                "실제 측정치 (Ground Truth)": 300 + np.random.normal(0, 30, len(time_idx_val))
+            })
+
+        # 2. 앙상블 예측 수행
+        X_target = df_val[['hour', 'minute', 'dayofweek']]
+        pred_rf = rf_model.predict(X_target)
+        if xgb_model is not None:
+            pred_xgb = xgb_model.predict(X_target)
+            predicted_vals = (0.5 * pred_rf) + (0.5 * pred_xgb)
+        else:
+            predicted_vals = pred_rf
+
+        df_val['앙상블 예측치 (RF+XGB)'] = predicted_vals
+        df_val['잔차 (Residual)'] = df_val['실제 측정치 (Ground Truth)'] - df_val['앙상블 예측치 (RF+XGB)']
+
+        # 3. 성능 지표 계산
+        residuals = df_val['잔차 (Residual)']
+        actuals = df_val['실제 측정치 (Ground Truth)']
+        calc_mae = np.mean(np.abs(residuals))
+        calc_rmse = np.sqrt(np.mean(residuals ** 2))
+        mape = np.mean(np.abs(residuals / np.where(actuals == 0, 1, actuals))) * 100
+        max_error = np.max(np.abs(residuals))
+        std_error = np.std(residuals)
+
+        v1, v2, v3, v4, v5 = st.columns(5)
+        v1.metric("MAE (평균절대오차)", f"{calc_mae:.2f} 명")
+        v2.metric("RMSE (제곱근평균오차)", f"{calc_rmse:.2f} 명")
+        v3.metric("MAPE (평균절대백분율오차)", f"{mape:.2f}%")
+        v4.metric("Max Error (최대오차)", f"{max_error:.2f} 명")
+        v5.metric("Model Stability", f"±{std_error:.2f} 명")
+        
+        st.divider()
+
+        st.subheader(f"📈 [{target_date_str}] 실제 측정값 vs AI 예측치 비교 검증")
+        df_melted = df_val.melt("시간", value_vars=["실제 측정치 (Ground Truth)", "앙상블 예측치 (RF+XGB)"], var_name="구분", value_name="인원")
+        val_chart = alt.Chart(df_melted).mark_line(point=True, strokeWidth=2.5).encode(
+            x=alt.X('시간:T', title='타임라인'),
+            y=alt.Y('인원:Q', title='체류 인원 (명)'),
+            color=alt.Color('구분:N', scale=alt.Scale(range=['#10b981', '#38bdf8']))
+        ).properties(height=320)
+        st.altair_chart(val_chart, use_container_width=True)
+
+        col_sub1, col_sub2 = st.columns(2)
+        with col_sub1:
+            st.subheader("📉 잔차(Residuals) 분석")
+            res_chart = alt.Chart(df_val).mark_bar(color='#f43f5e').encode(x='시간:T', y='잔차 (Residual):Q').properties(height=260)
+            st.altair_chart(res_chart, use_container_width=True)
+        with col_sub2:
+            st.subheader("📊 오차 분포 밀도")
+            hist_chart = alt.Chart(df_val).mark_bar(color='#8b5cf6').encode(x=alt.X('잔차 (Residual):Q', bin=True), y='count():Q').properties(height=260)
+            st.altair_chart(hist_chart, use_container_width=True)
 
 # ==========================================
 # 4. 📡 실시간 센서 파이프라인 (Live)
