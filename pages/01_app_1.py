@@ -792,24 +792,40 @@ elif menu == "🗺️ 터미널 구역별 상세 분석":
         st.markdown(html_table_staff, unsafe_allow_html=True)
 
 # ==========================================
-# 3. 🔍 모델 예측 및 검증 (Validation - 앙상블 적용)
+# 3. 🔍 모델 예측 및 검증 (Validation)
 # ==========================================
 elif menu == "🔍 모델 예측 및 검증 (Validation)":
     st.title("🔍 인공지능 기반 여객 수요 예측 앙상블 모델 검증")
-    st.markdown(f"> **[모델 관리 및 검증 모드]** 버튼을 눌러 데이터를 직접 학습시키거나, 저장된 AI 모델(`{RF_MODEL_PATH}`, `{XGB_MODEL_PATH}`)을 활용하여 **Random Forest와 XGBoost의 앙상블 예측치(각 50어가중치 결합)**를 현재 선택하신 **{target_date_str}**의 실제 측정값과 정밀 비교합니다.")
+    st.markdown(f"> **[모델 관리 및 검증 모드]** 깃허브에 저장된 AI 모델(`{RF_MODEL_PATH}`, `{XGB_MODEL_PATH}`)을 자동으로 탐색합니다. 파일이 없거나 새로 학습하고 싶을 때만 아래 버튼을 사용하세요.")
+
+    # 1. 깃허브 또는 로컬에 모델이 존재하는지 확인
+    rf_exists = os.path.exists(RF_MODEL_PATH)
+    xgb_exists = os.path.exists(XGB_MODEL_PATH)
+
+    if rf_exists and xgb_exists:
+        st.success(f"✅ 깃허브(또는 로컬 환경)에서 기존 학습 모델을 성공적으로 불러왔습니다! (`{RF_MODEL_PATH}`, `{XGB_MODEL_PATH}`)")
+    else:
+        st.warning("⚠️ 깃허브 저장소에 사전 학습된 모델 파일(`.pkl`)이 없습니다. 아래에서 **[모델 학습 시작하기]**를 눌러주세요.")
 
     st.markdown("### ⚙️ AI 모델 학습 제어 패널")
-    if st.button("🔄 9~10월 데이터로 AI 모델 학습 및 저장하기 (Train Model)"):
+    
+    # 학습 버튼 (날짜를 바꾼다고 자동으로 눌리지 않고, 사용자가 직접 누를 때만 동작)
+    if st.button("🔄 9~10월 데이터로 AI 모델 새로 학습 및 저장하기 (Train Model)"):
         with st.spinner("AI 모델을 학습 중입니다. 잠시만 기다려주세요..."):
             success, msg = train_and_save_models()
             if success:
                 st.success(f"🎉 {msg}")
+                # 학습 직후 최신 상태 반영을 위해 페이지 새로고침 효과
+                st.rerun()
             else:
                 st.error(f"❌ 학습 실패: {msg}")
 
-    if os.path.exists(RF_MODEL_PATH) and os.path.exists(XGB_MODEL_PATH):
+    # 2. 모델이 존재하거나 학습이 완료된 경우에만 '다운로드 버튼' 및 '검증 대시보드' 활성화
+    rf_model, xgb_model = load_precomputed_models()
+
+    if rf_model is not None:
         st.markdown("---")
-        st.markdown("##### 📥 학습된 모델 파일 다운로드")
+        st.markdown("##### 📥 방금 학습(또는 불러온) 모델 파일 다운로드")
         col_down1, col_down2 = st.columns(2)
         
         with open(RF_MODEL_PATH, "rb") as f:
@@ -820,22 +836,19 @@ elif menu == "🔍 모델 예측 및 검증 (Validation)":
                 mime="application/octet-stream"
             )
             
-        with open(XGB_MODEL_PATH, "rb") as f:
-            col_down2.download_button(
-                label="📥 XGBoost 모델 다운로드 (.pkl)",
-                data=f,
-                file_name="xgb_model.pkl",
-                mime="application/octet-stream"
-            )
-        st.info("💡 위 버튼을 눌러 다운받은 `.pkl` 파일들을 깃허브 프로젝트 폴더에 업로드하시면 깃허브 기반 예측이 바로 가능합니다!")
+        if os.path.exists(XGB_MODEL_PATH):
+            with open(XGB_MODEL_PATH, "rb") as f:
+                col_down2.download_button(
+                    label="📥 XGBoost 모델 다운로드 (.pkl)",
+                    data=f,
+                    file_name="xgb_model.pkl",
+                    mime="application/octet-stream"
+                )
+        st.info("💡 다운로드한 `.pkl` 파일을 깃허브(GitHub) 레포지토리에 직접 업로드해두시면, 다음부터는 학습을 누를 필요 없이 깃허브의 모델을 자동 적용합니다!")
 
-    st.divider()
+        st.divider()
 
-    rf_model, xgb_model = load_precomputed_models()
-
-    if rf_model is None:
-        st.warning(f"⚠️ 저장된 모델 파일(`{RF_MODEL_PATH}`)이 없습니다. 위쪽의 **[학습 및 저장하기]** 버튼을 먼저 눌러주세요!")
-    else:
+        # 예측 및 검증 로직 실행 (날짜를 바꿔도 모델이 있으면 이쪽으로 곧바로 진입함)
         if exists and past_time_data:
             val_rows = []
             for t_idx in sorted(past_time_data.keys()):
@@ -864,12 +877,12 @@ elif menu == "🔍 모델 예측 및 검증 (Validation)":
                 "실제 측정치 (Ground Truth)": 300 + np.random.normal(0, 30, len(time_idx_val))
             })
 
-        # 💡 [핵심 반영] 앙상블 모델 예측 수행 (Random Forest 50% + XGBoost 50%)
+        # 앙상블 모델 예측 수행 (Random Forest 50% + XGBoost 50%)
         X_target = df_val[['hour', 'minute', 'dayofweek']]
         pred_rf = rf_model.predict(X_target)
         if xgb_model is not None:
             pred_xgb = xgb_model.predict(X_target)
-            predicted_vals = (0.5 * pred_rf) + (0.5 * pred_xgb)  # 앙상블 블렌딩 가중치 적용
+            predicted_vals = (0.5 * pred_rf) + (0.5 * pred_xgb)
         else:
             predicted_vals = pred_rf
 
@@ -904,7 +917,8 @@ elif menu == "🔍 모델 예측 및 검증 (Validation)":
             view=alt.ViewConfig(stroke=None)
         )
         st.altair_chart(val_chart, use_container_width=True)
-
+    else:
+        st.error(f"⚠️ 사용 가능한 모델이 없습니다. 깃허브 레포지토리에 `{RF_MODEL_PATH}` 파일이 업로드되어 있는지 확인하시거나, 위쪽의 **[모델 학습 새로 시작하기]** 버튼을 눌러주세요.")
 # ==========================================
 # 4. 📡 실시간 센서 파이프라인 (Live)
 # ==========================================
