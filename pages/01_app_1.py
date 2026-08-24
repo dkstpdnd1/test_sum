@@ -464,7 +464,6 @@ def train_and_save_models():
     progress_bar.progress(1.0)
     status_text.text("✨ 학습 및 저장 완료!")
     
-    # 잠시 후 진행바와 텍스트를 깔끔하게 지우기 위해 유지 (선택사항)
     st.cache_resource.clear()
     return True, f"총 {len(df_train):,}개 샘플로 모델 학습 및 저장 완료!"
 
@@ -816,6 +815,29 @@ elif menu == "🔍 모델 예측 및 검증 (Validation)":
             else:
                 st.error(f"❌ 학습 실패: {msg}")
 
+    # --- 📥 [추가된 부분] 방금 학습된 모델 파일을 다운로드하는 버튼 ---
+    if os.path.exists(RF_MODEL_PATH) and os.path.exists(XGB_MODEL_PATH):
+        st.markdown("---")
+        st.markdown("##### 📥 학습된 모델 파일 다운로드")
+        col_down1, col_down2 = st.columns(2)
+        
+        with open(RF_MODEL_PATH, "rb") as f:
+            col_down1.download_button(
+                label="📥 Random Forest 모델 다운로드 (.pkl)",
+                data=f,
+                file_name="rf_model.pkl",
+                mime="application/octet-stream"
+            )
+            
+        with open(XGB_MODEL_PATH, "rb") as f:
+            col_down2.download_button(
+                label="📥 XGBoost 모델 다운로드 (.pkl)",
+                data=f,
+                file_name="xgb_model.pkl",
+                mime="application/octet-stream"
+            )
+        st.info("💡 위 버튼을 눌러 다운받은 `.pkl` 파일들을 깃허브 프로젝트 폴더에 그대로 업로드(Commit & Push)하시면, 다음부터는 깃허브에 있는 모델로 곧바로 예측이 수행됩니다!")
+
     st.divider()
 
     # 모델 불러오기
@@ -831,7 +853,6 @@ elif menu == "🔍 모델 예측 및 검증 (Validation)":
                 total_p = sum({k: v for k, v in past_time_data[t_idx]['counts'].items() if k not in ["GH", "IM1", "IM2", "Outside"]}.values())
                 total_sec = int(t_idx) * 10
                 h, m = total_sec // 3600, (total_sec % 3600) // 60
-                # 날짜와 시간을 포맷을 명시하여 안전하게 변환 (에러 발생 시 NaT 처리 후 필터링)
                 time_str = f"{target_date_str} {int(h):02d}:{int(m):02d}:00"
                 parsed_time = pd.to_datetime(time_str, format="%Y-%m-%d %H:%M:%S", errors="coerce")
                 
@@ -843,7 +864,7 @@ elif menu == "🔍 모델 예측 및 검증 (Validation)":
                     "실제 측정치 (Ground Truth)": total_p
                 })
             df_val = pd.DataFrame(val_rows)
-            df_val = df_val.dropna(subset=["시간"])  # 잘못된 날짜 형식으로 변환 실패한 행 제거
+            df_val = df_val.dropna(subset=["시간"])
         else:
             time_idx_val = pd.date_range(f"{target_date_str} 06:00:00", f"{target_date_str} 22:00:00", freq="30min")
             df_val = pd.DataFrame({
