@@ -796,59 +796,47 @@ elif menu == "🗺️ 터미널 구역별 상세 분석":
 # ==========================================
 elif menu == "🔍 모델 예측 및 검증 (Validation)":
     st.title("🔍 인공지능 기반 여객 수요 예측 앙상블 모델 검증")
-    st.markdown("> **[모델 관리 및 검증 모드]** 모델 파일을 학습하고 다운로드합니다.")
+    st.markdown("> **[모델 관리 및 검증 모드]** 버튼 하나로 모델을 학습하고 곧바로 파일을 다운로드합니다.")
 
     # 1. 파일 경로 탐색
     ENSEMBLE_PATH = "pages/ensemble_traffic_model.pkl"
     if not os.path.exists(ENSEMBLE_PATH) and os.path.exists("ensemble_traffic_model.pkl"):
         ENSEMBLE_PATH = "ensemble_traffic_model.pkl"
 
-    ensemble_exists = os.path.exists(ENSEMBLE_PATH)
+    # 2. 학습 및 즉시 다운로드 제어 패널
+    st.markdown("### ⚙️ AI 앙상블 모델 학습 및 다운로드 패널")
+    st.info("💡 아래 버튼을 누르면 모델이 학습된 직후, 깃허브에 올릴 수 있는 `.pkl` 파일이 자동으로 다운로드됩니다!")
 
-    # 2. 학습 제어 패널
-    st.markdown("### ⚙️ AI 앙상블 모델 학습 제어 패널")
-    
-    if st.button("🔄 9~10월 데이터로 앙상블 모델(RF + XGB) 학습 및 생성하기"):
-        with st.spinner("Random Forest와 XGBoost를 모두 학습하고 앙상블 패키지를 생성 중입니다..."):
+    # 학습 버튼 클릭 시 처리
+    if st.button("🔄 9~10월 데이터로 앙상블 모델 학습 및 즉시 다운로드 파일 생성"):
+        with st.spinner("Random Forest와 XGBoost를 학습하고 있습니다. 잠시만 기다려주세요..."):
             success, msg = train_and_save_models()
             if success:
                 st.success(f"🎉 {msg}")
-                st.rerun()
+                st.session_state["model_just_trained"] = True
             else:
                 st.error(f"❌ 학습 실패: {msg}")
 
-    st.markdown("---")
-    
-    # 🚨 [핵심 수정] 파일 존재 여부(`if ensemble_exists`)와 상관없이 다운로드 버튼을 무조건 화면에 렌더링합니다!
-    st.markdown("##### 📥 앙상블 모델 패키지 다운로드 (상시 노출 영역)")
+    # 파일이 존재하거나 방금 막 학습된 경우, 상시 다운로드 버튼 제공
+    ensemble_exists = os.path.exists(ENSEMBLE_PATH) or st.session_state.get("model_just_trained", False)
 
-    # 파일이 실제로 존재하는 경우에만 정상 작동하는 다운로드 버튼 연결
-    if os.path.exists(ENSEMBLE_PATH):
-        st.success(f"✅ 모델 파일이 감지되었습니다! (`{ENSEMBLE_PATH}`)")
+    if ensemble_exists and os.path.exists(ENSEMBLE_PATH):
+        st.markdown("---")
+        st.markdown("##### 📥 깃허브 업로드용 앙상블 모델 패키지 다운로드")
+        
         with open(ENSEMBLE_PATH, "rb") as f:
             st.download_button(
-                label="📥 앙상블 모델 패키지 다운로드 (.pkl) (클릭 가능)",
+                label="📥 지금 바로 .pkl 파일 다운로드하기 (클릭)",
                 data=f,
                 file_name="ensemble_traffic_model.pkl",
                 mime="application/octet-stream",
-                key="always_visible_download_btn"
+                key="direct_download_pkl_btn"
             )
-    else:
-        st.warning("⚠️ 현재 폴더에 모델 파일이 없습니다. 위쪽의 [학습 및 생성하기] 버튼을 누르면 파일이 생성되면서 버튼이 활성화됩니다.")
-        # 파일이 없어서 다운로드는 못하지만, 버튼이 눈에 보이도록 비활성화 상태로 배치
-        st.download_button(
-            label="📥 [파일 없음] 앙상블 모델 패키지 다운로드 (.pkl)",
-            data=b"",
-            file_name="ensemble_traffic_model.pkl",
-            mime="application/octet-stream",
-            disabled=True,
-            key="disabled_download_btn"
-        )
+        st.success("✅ 다운로드 버튼이 활성화되었습니다! 버튼을 눌러 파일을 받으신 후 깃허브 `pages/` 폴더에 업로드해 주세요.")
 
-    st.divider()
+        st.divider()
 
-    # 3. 모델이 실제로 존재할 때만 검증 및 차트 렌더링 수행
-    if os.path.exists(ENSEMBLE_PATH):
+        # 3. 모델 로드 및 검증 수행
         try:
             ensemble_model_pkg = joblib.load(ENSEMBLE_PATH)
         except Exception as e:
