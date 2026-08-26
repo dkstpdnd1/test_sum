@@ -13,8 +13,7 @@ import altair as alt
 # --- [시스템 설정] ---
 AREA_FILE_PATH = "terminal_areas_grouped_2.csv"         
 BACKGROUND_IMAGE_PATH = "ICN_Airport_3F.png"         
-RF_MODEL_PATH = "rf_model.pkl"                       
-XGB_MODEL_PATH = "xgb_model.pkl"                     
+ENSEMBLE_MODEL_PATH = "ensemble_traffic_model.pkl"   # 통합 앙상블 모델 경로 설정
 
 
 # --- [디자인 시스템: 극도로 전문적인 하이엔드 관제 스타일 CSS 적용] ---
@@ -378,12 +377,11 @@ def load_data_by_date(selected_date_str):
         time_grouped_data[t_index] = {'counts': dict(zip(filtered['area'], filtered['num_people']))}
     return area_df, time_grouped_data, sorted(list(time_grouped_data.keys())), bg_img, True
 
-# --- [AI 모델 로드 함수] ---
+# --- [AI 모델 로드 함수 (통합 앙상블 모델)] ---
 @st.cache_resource
 def load_precomputed_models():
-    rf = joblib.load(RF_MODEL_PATH) if os.path.exists(RF_MODEL_PATH) else None
-    xgb = joblib.load(XGB_MODEL_PATH) if os.path.exists(XGB_MODEL_PATH) else None
-    return rf, xgb
+    ensemble_model = joblib.load(ENSEMBLE_MODEL_PATH) if os.path.exists(ENSEMBLE_MODEL_PATH) else None
+    return ensemble_model
 
 def get_daily_peaks(df_trend):
     peaks = {}
@@ -721,18 +719,18 @@ elif menu == "🗺️ 터미널 구역별 상세 분석":
 # ==========================================
 elif menu == "🔍 모델 예측 및 검증 (Validation)":
     st.title("🔍 인공지능 기반 여객 수요 예측 모델 검증")
-    st.markdown("> **[모델 검증 모드]** 사전 학습된 예측 모델을 불러와 성능을 검증합니다.")
+    st.markdown("> **[모델 검증 모드]** 사전 학습된 통합 앙상블 예측 모델(`ensemble_traffic_model.pkl`)을 불러와 성능을 검증합니다.")
 
-    # 모델 파일 로드
-    rf_model, xgb_model = load_precomputed_models()
+    # 통합 앙상블 모델 로드
+    ensemble_model = load_precomputed_models()
 
-    if rf_model is None and xgb_model is None:
-        st.error(f"⚠️ 저장된 예측 모델 파일(`{RF_MODEL_PATH}` 또는 `{XGB_MODEL_PATH}`)을 찾을 수 없습니다. 모델 파일을 경로에 위치시켜 주세요.")
+    if ensemble_model is None:
+        st.error(f"⚠️ 저장된 통합 예측 모델 파일(`{ENSEMBLE_MODEL_PATH}`)을 찾을 수 없습니다. 경로에 파일을 위치시켜 주세요.")
     else:
-        st.success("✅ 사전 학습된 예측 모델을 성공적으로 불러왔습니다.")
+        st.success(f"✅ 통합 앙상블 모델(`{ENSEMBLE_MODEL_PATH}`)을 성공적으로 불러왔습니다.")
         st.divider()
 
-        # 사이드바 혹은 상단에 검증 그래프용 이동평균 설정 추가
+        # 검증 그래프용 이동평균 설정 슬라이더
         val_window = st.sidebar.slider("검증 그래프 이동평균 윈도우 크기", min_value=1, max_value=15, value=5, step=1)
 
         # 예측 및 검증 로직 실행
@@ -764,16 +762,9 @@ elif menu == "🔍 모델 예측 및 검증 (Validation)":
                 "실제 측정치 (Ground Truth)": 300 + np.random.normal(0, 30, len(time_idx_val))
             })
 
-        # 예측 수행
+        # 앙상블 모델을 통한 예측 수행
         X_target = df_val[['hour', 'minute', 'dayofweek']]
-        pred_rf = rf_model.predict(X_target) if rf_model else 0
-        if xgb_model is not None:
-            pred_xgb = xgb_model.predict(X_target)
-            predicted_vals = (0.5 * pred_rf) + (0.5 * pred_xgb)
-        else:
-            predicted_vals = pred_rf
-
-        df_val['모델 예측치'] = predicted_vals
+        df_val['모델 예측치'] = ensemble_model.predict(X_target)
         
         # 이동평균 적용 (노이즈 완화)
         df_val['실제 측정치 (Ground Truth)'] = df_val['실제 측정치 (Ground Truth)'].rolling(window=val_window, min_periods=1, center=True).mean()
