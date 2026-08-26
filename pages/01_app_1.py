@@ -450,6 +450,7 @@ if menu != "📡 실시간 센서 파이프라인 (Live)":
     selected_date = st.sidebar.date_input("📅 관제 대상일자 선택 (Playback)", value=datetime.date(2025, 10, 4))
     target_date_str = selected_date.strftime("%Y-%m-%d")
 
+    # [추가 요청 반영] 사이드바에 이동평균 조절 바 배치
     st.sidebar.markdown("### 🎛️ 분석 파라미터 제어")
     window_size = st.sidebar.slider(
         "이동평균 윈도우 크기 (분)",
@@ -574,6 +575,7 @@ elif menu == "🗺️ 터미널 구역별 상세 분석":
         df_trend['이동평균'] = df_trend['인원'].rolling(window=window_size * 6, min_periods=1).mean()
         
         df_plot = df_trend.reset_index()
+        # [추가 요청 반영] 그래프 두께 얇게 조절 (strokeWidth=1.5)
         chart = alt.Chart(df_plot).mark_area(
             color=alt.Gradient(
                 gradient='linear',
@@ -653,6 +655,7 @@ elif menu == "🗺️ 터미널 구역별 상세 분석":
                 color='구역:N'
             ).properties(height=350)
             
+            # [추가 요청 반영] 구역별 상세 시계열 라인 두께도 얇게 조절 (strokeWidth=1.2)
             line = base_area.mark_line(strokeWidth=1.2)
             
             if not df_area_peaks.empty:
@@ -737,6 +740,8 @@ elif menu == "🔍 모델 예측 및 검증 (Validation)":
     if not os.path.exists(ENSEMBLE_PATH) and os.path.exists("ensemble_traffic_model.pkl"):
         ENSEMBLE_PATH = "ensemble_traffic_model.pkl"
 
+    # [요청 반영] 모델 학습 제어 패널 및 깃허브 다운로드 패널 부분 코드를 완전 삭제함.
+
     # 2. 모델 로드 및 검증 수행
     ensemble_model_pkg = None
     if os.path.exists(ENSEMBLE_PATH):
@@ -814,7 +819,7 @@ elif menu == "🔍 모델 예측 및 검증 (Validation)":
         st.subheader(f"📈 [{target_date_str}] 실제 측정값 vs 앙상블 예측치 비교 검증")
         df_melted = df_val.melt("시간", value_vars=["실제 측정치 (Ground Truth)", "앙상블 예측치 (RF+XGB)"], var_name="구분", value_name="인원")
         
-        # [수정 반영] 모델 예측 및 검증 메뉴의 그래프 선 두께를 1.2로 얇게 조절
+        # [추가 요청 반영] 검증 그래프 선 두께도 얇게 조절 (strokeWidth=1.2)
         val_chart = alt.Chart(df_melted).mark_line(point=True, strokeWidth=1.2).encode(
             x=alt.X('시간:T', title='타임라인', axis=alt.Axis(labelColor='#94a3b8', titleColor='#f8fafc')),
             y=alt.Y('인원:Q', title='체류 인원 (명)', axis=alt.Axis(labelColor='#94a3b8', titleColor='#f8fafc')),
