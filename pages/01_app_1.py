@@ -819,8 +819,8 @@ elif menu == "🔍 모델 예측 및 검증 (Validation)":
         st.subheader(f"📈 [{target_date_str}] 실제 측정값 vs 앙상블 예측치 비교 검증")
         df_melted = df_val.melt("시간", value_vars=["실제 측정치 (Ground Truth)", "앙상블 예측치 (RF+XGB)"], var_name="구분", value_name="인원")
         
-        # [추가 요청 반영] 검증 그래프 선 두께도 얇게 조절 (strokeWidth=1.2)
-        val_chart = alt.Chart(df_melted).mark_line(point=True, strokeWidth=1.2).encode(
+        # [수정 반영] point=True를 제거하고 strokeWidth를 1.0으로 낮추어 선이 굵어 보이던 현상을 해결했습니다.
+        val_chart = alt.Chart(df_melted).mark_line(strokeWidth=1.0).encode(
             x=alt.X('시간:T', title='타임라인', axis=alt.Axis(labelColor='#94a3b8', titleColor='#f8fafc')),
             y=alt.Y('인원:Q', title='체류 인원 (명)', axis=alt.Axis(labelColor='#94a3b8', titleColor='#f8fafc')),
             color=alt.Color('구분:N', scale=alt.Scale(range=['#10b981', '#38bdf8']))
