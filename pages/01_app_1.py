@@ -385,80 +385,12 @@ def load_data_by_date(selected_date_str):
         time_grouped_data[t_index] = {'counts': dict(zip(filtered['area'], filtered['num_people']))}
     return area_df, time_grouped_data, sorted(list(time_grouped_data.keys())), bg_img, True
 
-# --- [AI 모델 로드 및 학습 함수] ---
+# --- [AI 모델 로드 함수] ---
 @st.cache_resource
 def load_precomputed_models():
     rf = joblib.load(RF_MODEL_PATH) if os.path.exists(RF_MODEL_PATH) else None
     xgb = joblib.load(XGB_MODEL_PATH) if os.path.exists(XGB_MODEL_PATH) else None
     return rf, xgb
-
-def train_and_save_models():
-    all_files = glob.glob("area_count_time_full_*.csv")
-    if not all_files:
-        return False, "학습할 CSV 파일(`area_count_time_full_*.csv`)을 찾지 못했습니다."
-
-    progress_bar = st.progress(0)
-    status_text = st.empty()
-    
-    total_files = len(all_files)
-    collected_rows = []
-    
-    for i, fpath in enumerate(all_files):
-        progress_percent = int(((i + 1) / total_files) * 70)
-        progress_bar.progress(progress_percent / 100)
-        status_text.text(f"📁 파일 파싱 중... ({i + 1}/{total_files}) - {os.path.basename(fpath)}")
-        
-        try:
-            df_part = pd.read_csv(fpath)
-            if not {'time_index', 'area', 'num_people'}.issubset(df_part.columns):
-                continue
-            date_str = fpath.replace("area_count_time_full_", "").replace(".csv", "")
-            dt_base = pd.to_datetime(date_str, errors='coerce')
-            if pd.isna(dt_base):
-                continue
-                
-            for t_idx, group in df_part.groupby('time_index'):
-                filtered = group[group['area'] != 'Outside']
-                total_p = filtered['num_people'].sum()
-                total_sec = int(t_idx) * 10
-                h, m = total_sec // 3600, (total_sec % 3600) // 60
-                
-                collected_rows.append({
-                    "hour": h,
-                    "minute": m,
-                    "dayofweek": dt_base.dayofweek,
-                    "target": total_p
-                })
-        except Exception:
-            continue
-
-    df_train = pd.DataFrame(collected_rows)
-    if df_train.empty:
-        progress_bar.empty()
-        status_text.empty()
-        return False, "유효한 학습 데이터가 추출되지 않았습니다."
-
-    X = df_train[['hour', 'minute', 'dayofweek']]
-    y = df_train['target']
-
-    progress_bar.progress(0.75)
-    status_text.text("🤖 Random Forest 모델 학습 중...")
-    rf_model = RandomForestRegressor(n_estimators=5, random_state=42)
-    rf_model.fit(X, y)
-    joblib.dump(rf_model, RF_MODEL_PATH)
-
-    if HAS_XGB:
-        progress_bar.progress(0.90)
-        status_text.text("🚀 XGBoost 모델 학습 중...")
-        xgb_model = XGBRegressor(n_estimators=5, learning_rate=0.1, max_depth=3, random_state=42)
-        xgb_model.fit(X, y)
-        joblib.dump(xgb_model, XGB_MODEL_PATH)
-
-    progress_bar.progress(1.0)
-    status_text.text("✨ 학습 및 저장 완료!")
-    
-    st.cache_resource.clear()
-    return True, f"총 {len(df_train):,}개 샘플로 모델 학습 및 저장 완료!"
 
 def get_daily_peaks(df_trend):
     peaks = {}
@@ -517,6 +449,17 @@ if menu != "📡 실시간 센서 파이프라인 (Live)":
     st.sidebar.markdown("### 🛠️ 아카이브 제어 패널")
     selected_date = st.sidebar.date_input("📅 관제 대상일자 선택 (Playback)", value=datetime.date(2025, 10, 4))
     target_date_str = selected_date.strftime("%Y-%m-%d")
+
+    # [추가 요청 반영] 사이드바에 이동평균 조절 바 배치
+    st.sidebar.markdown("### 🎛️ 분석 파라미터 제어")
+    window_size = st.sidebar.slider(
+        "이동평균 윈도우 크기 (분)",
+        min_value=1,
+        max_value=30,
+        value=5,
+        step=1,
+        help="노이즈를 제거하고 추세를 파악하기 위한 이동평균 구간 설정"
+    )
 
     area_df, past_time_data, past_unique_times, bg_img, exists = load_data_by_date(target_date_str)
 else:
@@ -618,14 +561,6 @@ elif menu == "🗺️ 터미널 구역별 상세 분석":
     if not exists:
         st.error("데이터가 없습니다.")
     else:
-        window_size = st.sidebar.select_slider(
-            "이동평균 윈도우 크기 (분)",
-            options=[1, 3, 5, 10],
-            value=5,
-            help="노이즈를 제거하고 추세를 파악하기 위한 구간 설정"
-        )
-        st.sidebar.markdown('<div class="slider-range-labels"><span>1분</span><span>10분</span></div>', unsafe_allow_html=True)
-        
         st.subheader("📉 터미널 전체 여객 인원 흐름 시계열 분석")
         
         time_trend_data = []
@@ -640,6 +575,7 @@ elif menu == "🗺️ 터미널 구역별 상세 분석":
         df_trend['이동평균'] = df_trend['인원'].rolling(window=window_size * 6, min_periods=1).mean()
         
         df_plot = df_trend.reset_index()
+        # [추가 요청 반영] 그래프 두께 얇게 조절 (strokeWidth=1.5)
         chart = alt.Chart(df_plot).mark_area(
             color=alt.Gradient(
                 gradient='linear',
@@ -719,7 +655,8 @@ elif menu == "🗺️ 터미널 구역별 상세 분석":
                 color='구역:N'
             ).properties(height=350)
             
-            line = base_area.mark_line(strokeWidth=2.5)
+            # [추가 요청 반영] 구역별 상세 시계열 라인 두께도 얇게 조절 (strokeWidth=1.2)
+            line = base_area.mark_line(strokeWidth=1.2)
             
             if not df_area_peaks.empty:
                 rules = alt.Chart(df_area_peaks).mark_rule(strokeDash=[3,3]).encode(x='시간:T', color='구역:N')
@@ -796,75 +733,18 @@ elif menu == "🗺️ 터미널 구역별 상세 분석":
 # ==========================================
 elif menu == "🔍 모델 예측 및 검증 (Validation)":
     st.title("🔍 인공지능 기반 여객 수요 예측 앙상블 모델 검증")
-    st.markdown("> **[모델 관리 및 검증 모드]** 모델을 학습하고 곧바로 다운로드합니다.")
+    st.markdown("> **[모델 관리 및 검증 모드]** 학습된 앙상블 모델을 기반으로 예측 성능을 검증합니다.")
 
     # 1. 파일 경로 탐색
     ENSEMBLE_PATH = "pages/ensemble_traffic_model.pkl"
     if not os.path.exists(ENSEMBLE_PATH) and os.path.exists("ensemble_traffic_model.pkl"):
         ENSEMBLE_PATH = "ensemble_traffic_model.pkl"
 
-    # 2. 학습 및 메모리 다운로드 제어 패널
-    st.markdown("### ⚙️ AI 앙상블 모델 학습 및 다운로드 제어 패널")
-    
-    # 세션 상태에 다운로드용 바이트 데이터 저장 공간 확보
-    if "model_bytes" not in st.session_state:
-        st.session_state["model_bytes"] = None
+    # [요청 반영] 모델 학습 제어 패널 및 깃허브 다운로드 패널 부분 코드를 완전 삭제함.
 
-    if st.button("🔄 9~10월 데이터로 앙상블 모델(RF + XGB) 학습 및 다운로드 파일 생성"):
-        with st.spinner("Random Forest와 XGBoost를 모두 학습하고 있습니다..."):
-            success, msg = train_and_save_models()
-            if success:
-                st.success(f"🎉 {msg}")
-                
-                # ⭐ 핵심: 디스크 파일뿐만 아니라 메모리(Bytes)에도 패키지를 로드하여 즉시 다운로드 준비
-                target_path = ENSEMBLE_PATH if os.path.exists(ENSEMBLE_PATH) else "ensemble_traffic_model.pkl"
-                if os.path.exists(target_path):
-                    with open(target_path, "rb") as f:
-                        st.session_state["model_bytes"] = f.read()
-                st.rerun()
-            else:
-                st.error(f"❌ 학습 실패: {msg}")
-
-    st.markdown("---")
-    st.markdown("##### 📥 깃허브 업로드용 앙상블 모델 패키지 다운로드")
-
-    # 만약 세션에 데이터가 없지만 폴더에 파일이 존재한다면 읽어오기
-    if st.session_state["model_bytes"] is None and os.path.exists(ENSEMBLE_PATH):
-        with open(ENSEMBLE_PATH, "rb") as f:
-            st.session_state["model_bytes"] = f.read()
-
-    # 메모리에 다운로드할 데이터가 준비되어 있다면 즉시 다운로드 버튼 활성화
-    if st.session_state["model_bytes"] is not None:
-        st.success("✅ 다운로드 준비가 완료되었습니다! 아래 버튼을 눌러주세요.")
-        st.download_button(
-            label="📥 앙상블 모델 패키지 다운로드 (.pkl) (즉시 다운로드)",
-            data=st.session_state["model_bytes"],
-            file_name="ensemble_traffic_model.pkl",
-            mime="application/octet-stream",
-            key="memory_download_btn"
-        )
-    else:
-        st.warning("⚠️ 아직 학습된 모델 데이터가 없습니다. 위쪽의 **[학습 및 생성하기]** 버튼을 눌러주세요.")
-        st.download_button(
-            label="📥 앙상블 모델 패키지 다운로드 (.pkl) (비활성화)",
-            data=b"",
-            file_name="ensemble_traffic_model.pkl",
-            mime="application/octet-stream",
-            disabled=True,
-            key="disabled_memory_btn"
-        )
-
-    st.divider()
-
-    # 3. 모델 로드 및 검증 수행
+    # 2. 모델 로드 및 검증 수행
     ensemble_model_pkg = None
-    if st.session_state["model_bytes"] is not None:
-        try:
-            import io
-            ensemble_model_pkg = joblib.load(io.BytesIO(st.session_state["model_bytes"]))
-        except Exception as e:
-            st.error(f"❌ 메모리에서 모델을 불러오는 중 오류가 발생했습니다: {e}")
-    elif os.path.exists(ENSEMBLE_PATH):
+    if os.path.exists(ENSEMBLE_PATH):
         try:
             ensemble_model_pkg = joblib.load(ENSEMBLE_PATH)
         except Exception as e:
@@ -938,7 +818,9 @@ elif menu == "🔍 모델 예측 및 검증 (Validation)":
 
         st.subheader(f"📈 [{target_date_str}] 실제 측정값 vs 앙상블 예측치 비교 검증")
         df_melted = df_val.melt("시간", value_vars=["실제 측정치 (Ground Truth)", "앙상블 예측치 (RF+XGB)"], var_name="구분", value_name="인원")
-        val_chart = alt.Chart(df_melted).mark_line(point=True, strokeWidth=2.5).encode(
+        
+        # [추가 요청 반영] 검증 그래프 선 두께도 얇게 조절 (strokeWidth=1.2)
+        val_chart = alt.Chart(df_melted).mark_line(point=True, strokeWidth=1.2).encode(
             x=alt.X('시간:T', title='타임라인', axis=alt.Axis(labelColor='#94a3b8', titleColor='#f8fafc')),
             y=alt.Y('인원:Q', title='체류 인원 (명)', axis=alt.Axis(labelColor='#94a3b8', titleColor='#f8fafc')),
             color=alt.Color('구분:N', scale=alt.Scale(range=['#10b981', '#38bdf8']))
@@ -947,6 +829,9 @@ elif menu == "🔍 모델 예측 및 검증 (Validation)":
             view=alt.ViewConfig(stroke=None)
         )
         st.altair_chart(val_chart, use_container_width=True)
+    else:
+        st.warning(f"⚠️ 앙상블 모델 파일(`{ENSEMBLE_PATH}`)을 찾을 수 없습니다. 모델 파일을 경로에 위치시켜 주세요.")
+
 # ==========================================
 # 4. 📡 실시간 센서 파이프라인 (Live)
 # ==========================================
